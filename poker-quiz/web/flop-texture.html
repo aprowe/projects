@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Flop Texture Quiz</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+
+  <nav class="nav">
+    <a href="index.html" class="nav-back">← Quizzes</a>
+    <span class="nav-title">Flop Texture</span>
+    <span class="nav-score" id="navScore">0 pts</span>
+  </nav>
+  <div class="progress-bar"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
+
+  <!-- ── Quiz phase ── -->
+  <div id="quizSection">
+    <div class="round-header">
+      <span class="round-label">Round <span id="roundNum">1</span> of <span id="totalRounds">10</span></span>
+      <span class="round-question">How wet and dynamic is this flop?</span>
+    </div>
+
+    <div class="flop" id="flopDisplay"></div>
+
+    <div class="panel" style="margin:0 24px;">
+      <!-- Wetness slider -->
+      <div class="slider-group">
+        <div class="slider-label">
+          <span>Wetness <span class="slider-sublabel" id="wetnessDesc">Neutral</span></span>
+          <strong id="wetnessVal">50%</strong>
+        </div>
+        <input type="range" id="wetnessSlider" min="0" max="100" value="50">
+        <div class="slider-endpoints"><span>Very Dry</span><span>Very Wet</span></div>
+      </div>
+
+      <!-- Dynamic slider -->
+      <div class="slider-group" style="margin-top:20px;">
+        <div class="slider-label">
+          <span>Dynamism <span class="slider-sublabel" id="dynamicDesc">Neutral</span></span>
+          <strong id="dynamicVal">50%</strong>
+        </div>
+        <input type="range" id="dynamicSlider" min="0" max="100" value="50">
+        <div class="slider-endpoints"><span>Very Static</span><span>Very Dynamic</span></div>
+      </div>
+
+      <div style="margin-top:22px;">
+        <button class="btn btn-primary" id="submitBtn" style="width:100%;">Submit Answer</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Result phase ── -->
+  <div id="resultSection" class="hidden">
+    <div class="flop" id="flopResult"></div>
+
+    <div class="result-grid">
+      <div class="result-card panel" id="wetnessResult"></div>
+      <div class="result-card panel" id="dynamicResult"></div>
+    </div>
+
+    <div class="breakdown panel" style="margin:0 24px 14px;" id="breakdown"></div>
+
+    <div class="round-score" id="roundScore"></div>
+
+    <div class="btn-row">
+      <button class="btn btn-primary" id="nextBtn">Next Flop →</button>
+    </div>
+  </div>
+
+  <!-- ── Complete phase ── -->
+  <div id="completeSection" class="complete-section hidden">
+    <h2>Quiz Complete!</h2>
+    <div class="final-score-ring">
+      <span class="big-num" id="finalPts">0</span>
+      <span class="pts-label">POINTS</span>
+    </div>
+    <div class="grade-label" id="finalGrade"></div>
+    <div class="btn-row">
+      <button class="btn btn-primary" id="retryBtn">Play Again</button>
+      <a href="index.html" class="btn btn-secondary">More Quizzes</a>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ─────────────────────────────────────────────
+//  Constants
+// ─────────────────────────────────────────────
+const RANKS  = ['2','3','4','5','6','7','8','9','T','J','Q','K','A'];
+const SUITS  = ['s','h','d','c'];
+const SUIT_SYMBOLS = { s: '♠', h: '♥', d: '♦', c: '♣' };
+const SUIT_COLOR   = { s: 'black', h: 'red', d: 'red', c: 'black' };
+const TOTAL_ROUNDS = 10;
+
+// ─────────────────────────────────────────────
+//  Deck helpers
+// ─────────────────────────────────────────────
+function buildDeck() {
+  const deck = [];
+  for (const r of RANKS) for (const s of SUITS) deck.push({ rank: r, suit: s });
+  return deck;
+}
+
+function dealFlop() {
+  const deck = buildDeck();
+  const flop = [];
+  while (flop.length < 3) {
+    const i = Math.floor(Math.random() * deck.length);
+    flop.push(deck.splice(i, 1)[0]);
+  }
+  return flop;
+}
+
+// ─────────────────────────────────────────────
+//  Analysis engine
+//  NOTE: placeholder metrics — will be refined
+// ─────────────────────────────────────────────
+function analyzeFlop(cards) {
+  const rankIdx = r => RANKS.indexOf(r);
+  const ranks = cards.map(c => rankIdx(c.rank));
+  const suits = cards.map(c => c.suit);
+  const sorted = [...ranks].sort((a, b) => a - b);
+
+  // 1. Flush potential  (0–40 pts)
+  const suitCount = {};
+  suits.forEach(s => suitCount[s] = (suitCount[s] || 0) + 1);
+  const maxSuit = Math.max(...Object.values(suitCount));
+  const flushPts = maxSuit === 3 ? 40 : maxSuit === 2 ? 20 : 0;
+  const suitLabel = maxSuit === 3 ? 'Monotone' : maxSuit === 2 ? 'Two-tone' : 'Rainbow';
+
+  // 2. Straight draw potential  (0–40 pts)
+  const pairs = [
+    [sorted[0], sorted[1]],
+    [sorted[1], sorted[2]],
+    [sorted[0], sorted[2]],
+  ];
+  let straightPts = 0;
+  const straightNotes = [];
+  for (const [a, b] of pairs) {
+    const gap = b - a;
+    if (gap === 0) continue; // pair — no draw
+    const ra = RANKS[a], rb = RANKS[b];
+    if      (gap === 1) { straightPts += 14; straightNotes.push(`${ra}-${rb} connected`); }
+    else if (gap === 2) { straightPts += 10; straightNotes.push(`${ra}-${rb} one-gap`); }
+    else if (gap === 3) { straightPts +=  6; straightNotes.push(`${ra}-${rb} two-gap`); }
+    else if (gap === 4) { straightPts +=  3; straightNotes.push(`${ra}-${rb} three-gap`); }
+  }
+  // Bonus: all 3 cards fit in a 5-card straight window
+  const span = sorted[2] - sorted[0];
+  const allUnique = new Set(sorted).size === 3;
+  if (allUnique && span <= 4) { straightPts += 10; straightNotes.push('wrap-around draw'); }
+
+  // Wheel potential: Ace + low cards
+  if (ranks.includes(12)) {
+    const lowCards = sorted.filter(r => r <= 3);
+    if (lowCards.length === 1) { straightPts += 6;  straightNotes.push('wheel draw (A + low)'); }
+    if (lowCards.length >= 2)  { straightPts += 12; straightNotes.push('strong wheel draw'); }
+  }
+
+  straightPts = Math.min(40, straightPts);
+
+  // 3. Board rank factor — lower boards have more draw combinations  (0–20 pts)
+  // Use the median card rank so outliers (lone 2 on AKx) don't skew it
+  const medianRank = sorted[1];
+  let rankPts;
+  if      (medianRank <= 2) rankPts = 20;   // very low board (2-4 as middle)
+  else if (medianRank <= 4) rankPts = 15;   // low board
+  else if (medianRank <= 6) rankPts = 10;   // mid-low
+  else if (medianRank <= 8) rankPts = 5;    // mid
+  else                      rankPts = 0;    // high board (J+ as middle)
+
+  // 4. Pair penalty
+  const isPaired = sorted[0] === sorted[1] || sorted[1] === sorted[2];
+  const isTrips  = sorted[0] === sorted[1] && sorted[1] === sorted[2];
+  const pairWetPenalty = isTrips ? 25 : isPaired ? 12 : 0;
+
+  // ── Wetness ──
+  const wetness = Math.max(0, Math.min(100,
+    flushPts + straightPts + rankPts - pairWetPenalty
+  ));
+
+  // ── Dynamic ──
+  // Dynamic = how much will equity shift on turn / river
+  // More draws → more dynamic; paired board → more static; monotone → slightly less dynamic
+  const pairDynPenalty    = isTrips ? 40 : isPaired ? 20 : 0;
+  const monotonePenalty   = maxSuit === 3 ? 8 : 0;   // flush already in; less build-up on later streets
+  const dynamic = Math.max(0, Math.min(100,
+    flushPts + straightPts + rankPts - pairDynPenalty - monotonePenalty
+  ));
+
+  return {
+    wetness, dynamic,
+    breakdown: {
+      flushPts, flushLabel: suitLabel,
+      straightPts, straightNotes,
+      rankPts, medianRank,
+      pairWetPenalty, pairDynPenalty, monotonePenalty,
+      isPaired, isTrips, maxSuit,
+    }
+  };
+}
+
+// ─────────────────────────────────────────────
+//  Scoring a guess
+// ─────────────────────────────────────────────
+function scoreGuess(guess, actual) {
+  const diff = Math.abs(guess - actual);
+  if (diff <= 10) return { stars: 3, cls: 'good',  label: 'Sharp!',  pts: 100 };
+  if (diff <= 22) return { stars: 2, cls: 'ok',    label: 'Close',   pts: 65  };
+  if (diff <= 38) return { stars: 1, cls: 'miss',  label: 'Rough',   pts: 30  };
+  return               { stars: 0, cls: 'miss',  label: 'Off',     pts: 0   };
+}
+
+function starsHtml(n) {
+  return '★'.repeat(n) + '☆'.repeat(3 - n);
+}
+
+// ─────────────────────────────────────────────
+//  Card rendering
+// ─────────────────────────────────────────────
+function cardHtml(card) {
+  const sym   = SUIT_SYMBOLS[card.suit];
+  const color = SUIT_COLOR[card.suit];
+  const r     = card.rank === 'T' ? '10' : card.rank;
+  return `
+    <div class="card ${color}">
+      <div class="tl">
+        <span class="rank-txt">${r}</span>
+        <span class="suit-sm">${sym}</span>
+      </div>
+      <span class="suit-lg">${sym}</span>
+      <div class="br">
+        <span class="rank-txt">${r}</span>
+        <span class="suit-sm">${sym}</span>
+      </div>
+    </div>`;
+}
+
+function renderFlop(container, flop) {
+  container.innerHTML = flop.map(cardHtml).join('');
+}
+
+// ─────────────────────────────────────────────
+//  Slider descriptors
+// ─────────────────────────────────────────────
+function wetnessDesc(v) {
+  if (v <= 15) return 'Very Dry';
+  if (v <= 35) return 'Dry';
+  if (v <= 55) return 'Neutral';
+  if (v <= 75) return 'Wet';
+  return 'Very Wet';
+}
+function dynamicDesc(v) {
+  if (v <= 15) return 'Very Static';
+  if (v <= 35) return 'Static';
+  if (v <= 55) return 'Neutral';
+  if (v <= 75) return 'Dynamic';
+  return 'Very Dynamic';
+}
+
+// ─────────────────────────────────────────────
+//  Quiz state
+// ─────────────────────────────────────────────
+let state = {
+  round: 1,
+  totalScore: 0,
+  currentFlop: null,
+  currentAnalysis: null,
+};
+
+function resetState() {
+  state.round = 1;
+  state.totalScore = 0;
+}
+
+// ─────────────────────────────────────────────
+//  UI helpers
+// ─────────────────────────────────────────────
+function show(id)  { document.getElementById(id).classList.remove('hidden'); }
+function hide(id)  { document.getElementById(id).classList.add('hidden'); }
+
+function updateNav() {
+  document.getElementById('navScore').textContent = state.totalScore + ' pts';
+  const pct = ((state.round - 1) / TOTAL_ROUNDS) * 100;
+  document.getElementById('progressFill').style.width = pct + '%';
+}
+
+// ─────────────────────────────────────────────
+//  Start a round
+// ─────────────────────────────────────────────
+function startRound() {
+  document.getElementById('roundNum').textContent = state.round;
+  document.getElementById('wetnessSlider').value  = 50;
+  document.getElementById('dynamicSlider').value  = 50;
+  document.getElementById('wetnessVal').textContent  = '50%';
+  document.getElementById('dynamicVal').textContent  = '50%';
+  document.getElementById('wetnessDesc').textContent = wetnessDesc(50);
+  document.getElementById('dynamicDesc').textContent = dynamicDesc(50);
+
+  state.currentFlop     = dealFlop();
+  state.currentAnalysis = analyzeFlop(state.currentFlop);
+
+  renderFlop(document.getElementById('flopDisplay'), state.currentFlop);
+
+  hide('resultSection');
+  hide('completeSection');
+  show('quizSection');
+  updateNav();
+}
+
+// ─────────────────────────────────────────────
+//  Submit answer
+// ─────────────────────────────────────────────
+function submitAnswer() {
+  const guessW  = parseInt(document.getElementById('wetnessSlider').value);
+  const guessD  = parseInt(document.getElementById('dynamicSlider').value);
+  const { wetness, dynamic, breakdown } = state.currentAnalysis;
+
+  const wRes = scoreGuess(guessW, wetness);
+  const dRes = scoreGuess(guessD, dynamic);
+  const roundPts = Math.round((wRes.pts + dRes.pts) / 2);
+  state.totalScore += roundPts;
+
+  // Render flop in result area
+  renderFlop(document.getElementById('flopResult'), state.currentFlop);
+
+  // Wetness result card
+  document.getElementById('wetnessResult').innerHTML = `
+    <div class="rc-label">Wetness</div>
+    <div class="rc-row">
+      <span class="rc-guess">You: ${guessW}%</span>
+      <span class="rc-actual ${wRes.cls}">${wetness}%</span>
+    </div>
+    <div class="rc-diff ${wRes.cls}">Δ ${Math.abs(guessW - wetness)}% — ${wRes.label}</div>
+    <div class="stars ${wRes.cls}">${starsHtml(wRes.stars)}</div>`;
+
+  // Dynamic result card
+  document.getElementById('dynamicResult').innerHTML = `
+    <div class="rc-label">Dynamism</div>
+    <div class="rc-row">
+      <span class="rc-guess">You: ${guessD}%</span>
+      <span class="rc-actual ${dRes.cls}">${dynamic}%</span>
+    </div>
+    <div class="rc-diff ${dRes.cls}">Δ ${Math.abs(guessD - dynamic)}% — ${dRes.label}</div>
+    <div class="stars ${dRes.cls}">${starsHtml(dRes.stars)}</div>`;
+
+  // Breakdown
+  const b = breakdown;
+  const rows = [
+    {
+      label: `Flush draws: ${b.flushLabel}`,
+      pts: b.flushPts,
+      neg: false,
+    },
+    {
+      label: b.straightNotes.length
+        ? `Straight draws: ${b.straightNotes.slice(0, 2).join(', ')}`
+        : 'Straight draws: None',
+      pts: b.straightPts,
+      neg: false,
+    },
+    {
+      label: `Board rank: ${b.rankPts > 0 ? 'Low/mid cards (' + RANKS[b.medianRank] + ' median)' : 'High cards (' + RANKS[b.medianRank] + ' median)'}`,
+      pts: b.rankPts,
+      neg: false,
+    },
+  ];
+  if (b.pairWetPenalty > 0) rows.push({
+    label: b.isTrips ? 'Trips on board (dry penalty)' : 'Paired board (dry penalty)',
+    pts: -b.pairWetPenalty,
+    neg: true,
+  });
+  if (b.monotonePenalty > 0) rows.push({
+    label: 'Monotone (dynamic penalty)',
+    pts: -b.monotonePenalty,
+    neg: true,
+  });
+
+  document.getElementById('breakdown').innerHTML = `
+    <h3>Score Breakdown</h3>
+    ${rows.map(r => `
+      <div class="breakdown-item">
+        <span>${r.label}</span>
+        <span class="breakdown-pts ${r.neg ? 'neg' : ''}">${r.neg ? '' : '+'}${r.pts}</span>
+      </div>`).join('')}`;
+
+  // Round score line
+  document.getElementById('roundScore').innerHTML =
+    `Round score: <strong>+${roundPts} pts</strong> &nbsp;·&nbsp; Total: <strong>${state.totalScore} pts</strong>`;
+
+  hide('quizSection');
+  show('resultSection');
+  updateNav();
+}
+
+// ─────────────────────────────────────────────
+//  Next round or finish
+// ─────────────────────────────────────────────
+function nextRound() {
+  state.round++;
+  if (state.round > TOTAL_ROUNDS) {
+    showComplete();
+  } else {
+    startRound();
+  }
+}
+
+function showComplete() {
+  hide('resultSection');
+  hide('quizSection');
+
+  const max = TOTAL_ROUNDS * 100;
+  const pct = state.totalScore / max;
+  let grade, cls;
+  if      (pct >= 0.90) { grade = 'A — Exceptional reads!';    cls = 'grade-A'; }
+  else if (pct >= 0.75) { grade = 'B — Solid board awareness'; cls = 'grade-B'; }
+  else if (pct >= 0.55) { grade = 'C — Getting there';         cls = 'grade-C'; }
+  else if (pct >= 0.35) { grade = 'D — Keep studying';         cls = 'grade-D'; }
+  else                  { grade = 'F — Time to hit the books';  cls = 'grade-F'; }
+
+  document.getElementById('finalPts').textContent  = state.totalScore;
+  document.getElementById('finalGrade').textContent = grade;
+  document.getElementById('finalGrade').className   = 'grade-label ' + cls;
+
+  document.getElementById('progressFill').style.width = '100%';
+  show('completeSection');
+}
+
+// ─────────────────────────────────────────────
+//  Wire up events
+// ─────────────────────────────────────────────
+document.getElementById('wetnessSlider').addEventListener('input', function () {
+  const v = +this.value;
+  document.getElementById('wetnessVal').textContent  = v + '%';
+  document.getElementById('wetnessDesc').textContent = wetnessDesc(v);
+});
+
+document.getElementById('dynamicSlider').addEventListener('input', function () {
+  const v = +this.value;
+  document.getElementById('dynamicVal').textContent  = v + '%';
+  document.getElementById('dynamicDesc').textContent = dynamicDesc(v);
+});
+
+document.getElementById('submitBtn').addEventListener('click', submitAnswer);
+document.getElementById('nextBtn').addEventListener('click', nextRound);
+document.getElementById('retryBtn').addEventListener('click', () => {
+  resetState();
+  startRound();
+});
+
+// ─────────────────────────────────────────────
+//  Kick off
+// ─────────────────────────────────────────────
+startRound();
+</script>
+</body>
+</html>
