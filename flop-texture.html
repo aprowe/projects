@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Flop Texture Quiz</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+
+  <nav class="nav">
+    <a href="index.html" class="nav-back">← Quizzes</a>
+    <span class="nav-title">Flop Texture</span>
+    <span class="nav-score" id="navScore">0 pts</span>
+  </nav>
+  <div class="progress-bar"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
+
+  <!-- ── Quiz phase ── -->
+  <div id="quizSection">
+    <div class="round-header">
+      <span class="round-label">Round <span id="roundNum">1</span> of <span id="totalRounds">10</span></span>
+      <span class="round-question">How wet and dynamic is this flop?</span>
+    </div>
+
+    <div class="flop" id="flopDisplay"></div>
+
+    <div class="panel" style="margin:0 24px;">
+      <!-- Wetness slider -->
+      <div class="slider-group">
+        <div class="slider-label">
+          <span>Wetness <span class="slider-sublabel" id="wetnessDesc">Neutral</span></span>
+          <strong id="wetnessVal">50%</strong>
+        </div>
+        <input type="range" id="wetnessSlider" min="0" max="100" value="50">
+        <div class="slider-endpoints"><span>Very Dry</span><span>Very Wet</span></div>
+      </div>
+
+      <!-- Dynamic slider -->
+      <div class="slider-group" style="margin-top:20px;">
+        <div class="slider-label">
+          <span>Dynamism <span class="slider-sublabel" id="dynamicDesc">Neutral</span></span>
+          <strong id="dynamicVal">50%</strong>
+        </div>
+        <input type="range" id="dynamicSlider" min="0" max="100" value="50">
+        <div class="slider-endpoints"><span>Very Static</span><span>Very Dynamic</span></div>
+      </div>
+
+      <div style="margin-top:22px;">
+        <button class="btn btn-primary" id="submitBtn" style="width:100%;">Submit Answer</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Result phase ── -->
+  <div id="resultSection" class="hidden">
+    <div class="flop" id="flopResult"></div>
+
+    <div class="result-grid">
+      <div class="result-card panel" id="wetnessResult"></div>
+      <div class="result-card panel" id="dynamicResult"></div>
+    </div>
+
+    <div class="breakdown panel" style="margin:0 24px 14px;" id="breakdown"></div>
+
+    <div class="round-score" id="roundScore"></div>
+
+    <div class="btn-row">
+      <button class="btn btn-primary" id="nextBtn">Next Flop →</button>
+    </div>
+  </div>
+
+  <!-- ── Complete phase ── -->
+  <div id="completeSection" class="complete-section hidden">
+    <h2>Quiz Complete!</h2>
+    <div class="final-score-ring">
+      <span class="big-num" id="finalPts">0</span>
+      <span class="pts-label">POINTS</span>
+    </div>
+    <div class="grade-label" id="finalGrade"></div>
+    <div class="btn-row">
+      <button class="btn btn-primary" id="retryBtn">Play Again</button>
+      <a href="index.html" class="btn btn-secondary">More Quizzes</a>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const RANKS  = ['2','3','4','5','6','7','8','9','T','J','Q','K','A'];
+const SUITS  = ['s','h','d','c'];
+const SUIT_SYMBOLS = { s: '♠', h: '♥', d: '♦', c: '♣' };
+const SUIT_COLOR   = { s: 'black', h: 'red', d: 'red', c: 'black' };
+const TOTAL_ROUNDS = 10;
+
+function buildDeck() {
+  const deck = [];
+  for (const r of RANKS) for (const s of SUITS) deck.push({ rank: r, suit: s });
+  return deck;
+}
+
+function dealFlop() {
+  const deck = buildDeck();
+  const flop = [];
+  while (flop.length < 3) {
+    const i = Math.floor(Math.random() * deck.length);
+    flop.push(deck.splice(i, 1)[0]);
+  }
+  return flop;
+}
+
+function uniqueRanks(cards) {
+  return [...new Set(cards.map(c => RANKS.indexOf(c.rank)))].sort((a, b) => a - b);
+}
+function gapCount(u) {
+  let g = 0;
+  for (let i = 0; i < u.length - 1; i++) g += u[i + 1] - u[i] - 1;
+  return g;
+}
+function maxSuitCount(cards) {
+  const sc = {};
+  cards.forEach(c => sc[c.suit] = (sc[c.suit] || 0) + 1);
+  return Math.max(...Object.values(sc));
+}
+function boardFeatures(cards) {
+  const u = uniqueRanks(cards);
+  return { connectedness: gapCount(u), maxSuit: maxSuitCount(cards), numUniqueRanks: u.length };
+}
+function featureDistance(a, b) {
+  return Math.abs(a.connectedness - b.connectedness)
+       + Math.abs(a.maxSuit - b.maxSuit)
+       + Math.abs(a.numUniqueRanks - b.numUniqueRanks);
+}
+function getRemainingCards(flopCards) {
+  const used = new Set(flopCards.map(c => c.rank + c.suit));
+  const rem = [];
+  for (const r of RANKS) for (const s of SUITS) {
+    if (!used.has(r + s)) rem.push({ rank: r, suit: s });
+  }
+  return rem;
+}
+function statVariance(arr) {
+  const mean = arr.reduce((a, b) => a + b, 0) / arr.length;
+  return arr.reduce((s, v) => s + (v - mean) ** 2, 0) / arr.length;
+}
+
+const WETNESS_MAX = 10;
+function calcWetness(flop) {
+  const f = boardFeatures(flop);
+  let score = 0;
+  if      (f.maxSuit === 2) score += 2;
+  else if (f.maxSuit === 3) score += 4;
+  if      (f.connectedness === 0) score += 4;
+  else if (f.connectedness === 1) score += 3;
+  else if (f.connectedness === 2) score += 2;
+  if (f.maxSuit >= 2 && f.connectedness <= 2) score += 2;
+  const suitLabel = f.maxSuit === 3 ? 'Monotone' : f.maxSuit === 2 ? 'Two-tone' : 'Rainbow';
+  const connLabel = f.connectedness === 0 ? '0 gaps — fully connected'
+                  : f.connectedness === 1 ? '1 gap'
+                  : f.connectedness === 2 ? '2 gaps'
+                  : `${f.connectedness} gaps — disconnected`;
+  const suitPts   = f.maxSuit === 3 ? 4 : f.maxSuit === 2 ? 2 : 0;
+  const connPts   = f.connectedness === 0 ? 4 : f.connectedness === 1 ? 3 : f.connectedness === 2 ? 2 : 0;
+  const comboBonus = f.maxSuit >= 2 && f.connectedness <= 2;
+  return { score, pct: Math.round((score / WETNESS_MAX) * 100), features: f, suitLabel, connLabel, suitPts, connPts, comboBonus };
+}
+
+const DYNAMIC_NORM = 13;
+function calcDynamic(flop) {
+  const baseF = boardFeatures(flop);
+  const remaining = getRemainingCards(flop);
+  const deltas = remaining.map(turn => featureDistance(baseF, boardFeatures([...flop, turn])));
+  const vari = statVariance(deltas);
+  const meanDelta = deltas.reduce((a, b) => a + b, 0) / deltas.length;
+  return { variance: vari, pct: Math.min(100, Math.round((vari / DYNAMIC_NORM) * 100)), meanDelta, baseFeatures: baseF };
+}
+
+function analyzeFlop(cards) {
+  const wet = calcWetness(cards);
+  const dyn = calcDynamic(cards);
+  return { wetness: wet.pct, dynamic: dyn.pct, breakdown: { wet, dyn } };
+}
+
+function scoreGuess(guess, actual) {
+  const diff = Math.abs(guess - actual);
+  if (diff <= 10) return { stars: 3, cls: 'good',  label: 'Sharp!', pts: 100 };
+  if (diff <= 22) return { stars: 2, cls: 'ok',    label: 'Close',  pts: 65  };
+  if (diff <= 38) return { stars: 1, cls: 'miss',  label: 'Rough',  pts: 30  };
+  return               { stars: 0, cls: 'miss',  label: 'Off',    pts: 0   };
+}
+function starsHtml(n) { return '★'.repeat(n) + '☆'.repeat(3 - n); }
+
+function cardHtml(card) {
+  const sym   = SUIT_SYMBOLS[card.suit];
+  const color = SUIT_COLOR[card.suit];
+  const r     = card.rank === 'T' ? '10' : card.rank;
+  return `<div class="card ${color}"><div class="tl"><span class="rank-txt">${r}</span><span class="suit-sm">${sym}</span></div><span class="suit-lg">${sym}</span><div class="br"><span class="rank-txt">${r}</span><span class="suit-sm">${sym}</span></div></div>`;
+}
+function renderFlop(container, flop) { container.innerHTML = flop.map(cardHtml).join(''); }
+
+function wetnessDesc(v) {
+  if (v <= 15) return 'Very Dry';
+  if (v <= 35) return 'Dry';
+  if (v <= 55) return 'Neutral';
+  if (v <= 75) return 'Wet';
+  return 'Very Wet';
+}
+function dynamicDesc(v) {
+  if (v <= 15) return 'Very Static';
+  if (v <= 35) return 'Static';
+  if (v <= 55) return 'Neutral';
+  if (v <= 75) return 'Dynamic';
+  return 'Very Dynamic';
+}
+
+let state = { round: 1, totalScore: 0, currentFlop: null, currentAnalysis: null };
+function resetState() { state.round = 1; state.totalScore = 0; }
+function show(id)  { document.getElementById(id).classList.remove('hidden'); }
+function hide(id)  { document.getElementById(id).classList.add('hidden'); }
+function updateNav() {
+  document.getElementById('navScore').textContent = state.totalScore + ' pts';
+  document.getElementById('progressFill').style.width = ((state.round - 1) / TOTAL_ROUNDS * 100) + '%';
+}
+
+function startRound() {
+  document.getElementById('roundNum').textContent = state.round;
+  document.getElementById('wetnessSlider').value = 50;
+  document.getElementById('dynamicSlider').value = 50;
+  document.getElementById('wetnessVal').textContent  = '50%';
+  document.getElementById('dynamicVal').textContent  = '50%';
+  document.getElementById('wetnessDesc').textContent = wetnessDesc(50);
+  document.getElementById('dynamicDesc').textContent = dynamicDesc(50);
+  state.currentFlop     = dealFlop();
+  state.currentAnalysis = analyzeFlop(state.currentFlop);
+  renderFlop(document.getElementById('flopDisplay'), state.currentFlop);
+  hide('resultSection'); hide('completeSection'); show('quizSection');
+  updateNav();
+}
+
+function submitAnswer() {
+  const guessW = parseInt(document.getElementById('wetnessSlider').value);
+  const guessD = parseInt(document.getElementById('dynamicSlider').value);
+  const { wetness, dynamic, breakdown } = state.currentAnalysis;
+  const wRes = scoreGuess(guessW, wetness);
+  const dRes = scoreGuess(guessD, dynamic);
+  const roundPts = Math.round((wRes.pts + dRes.pts) / 2);
+  state.totalScore += roundPts;
+
+  renderFlop(document.getElementById('flopResult'), state.currentFlop);
+
+  document.getElementById('wetnessResult').innerHTML = `
+    <div class="rc-label">Wetness</div>
+    <div class="rc-row"><span class="rc-guess">You: ${guessW}%</span><span class="rc-actual ${wRes.cls}">${wetness}%</span></div>
+    <div class="rc-diff ${wRes.cls}">Δ ${Math.abs(guessW - wetness)}% — ${wRes.label}</div>
+    <div class="stars ${wRes.cls}">${starsHtml(wRes.stars)}</div>`;
+
+  document.getElementById('dynamicResult').innerHTML = `
+    <div class="rc-label">Dynamism</div>
+    <div class="rc-row"><span class="rc-guess">You: ${guessD}%</span><span class="rc-actual ${dRes.cls}">${dynamic}%</span></div>
+    <div class="rc-diff ${dRes.cls}">Δ ${Math.abs(guessD - dynamic)}% — ${dRes.label}</div>
+    <div class="stars ${dRes.cls}">${starsHtml(dRes.stars)}</div>`;
+
+  const { wet, dyn } = breakdown;
+  const bf = dyn.baseFeatures;
+  document.getElementById('breakdown').innerHTML = `
+    <h3>Wetness  (score ${wet.score} / ${WETNESS_MAX})</h3>
+    <div class="breakdown-item"><span>Suit texture: ${wet.suitLabel}</span><span class="breakdown-pts">${wet.suitPts > 0 ? '+' + wet.suitPts : '—'}</span></div>
+    <div class="breakdown-item"><span>Connectivity: ${wet.connLabel}</span><span class="breakdown-pts">${wet.connPts > 0 ? '+' + wet.connPts : '—'}</span></div>
+    ${wet.comboBonus ? '<div class="breakdown-item"><span>Combo bonus (suited + connected)</span><span class="breakdown-pts">+2</span></div>' : ''}
+    <h3 style="margin-top:14px;">Dynamism  (variance ${dyn.variance.toFixed(2)} / ${DYNAMIC_NORM})</h3>
+    <div class="breakdown-item"><span>Gap count (connectedness)</span><span style="color:var(--text-muted);">${bf.connectedness}</span></div>
+    <div class="breakdown-item"><span>Max suit count</span><span style="color:var(--text-muted);">${bf.maxSuit}</span></div>
+    <div class="breakdown-item"><span>Unique ranks</span><span style="color:var(--text-muted);">${bf.numUniqueRanks}</span></div>
+    <div class="breakdown-item" style="margin-top:6px;border-top:1px solid rgba(255,255,255,0.07);padding-top:8px;"><span>Mean feature shift / turn</span><span style="color:var(--text-muted);">${dyn.meanDelta.toFixed(2)}</span></div>
+    <div class="breakdown-item"><span>Variance of shifts</span><span class="breakdown-pts">${dyn.variance.toFixed(2)}</span></div>`;
+
+  document.getElementById('roundScore').innerHTML =
+    `Round score: <strong>+${roundPts} pts</strong> &nbsp;·&nbsp; Total: <strong>${state.totalScore} pts</strong>`;
+
+  hide('quizSection'); show('resultSection'); updateNav();
+}
+
+function nextRound() {
+  state.round++;
+  if (state.round > TOTAL_ROUNDS) showComplete();
+  else startRound();
+}
+
+function showComplete() {
+  hide('resultSection'); hide('quizSection');
+  const pct = state.totalScore / (TOTAL_ROUNDS * 100);
+  let grade, cls;
+  if      (pct >= 0.90) { grade = 'A — Exceptional reads!';    cls = 'grade-A'; }
+  else if (pct >= 0.75) { grade = 'B — Solid board awareness'; cls = 'grade-B'; }
+  else if (pct >= 0.55) { grade = 'C — Getting there';         cls = 'grade-C'; }
+  else if (pct >= 0.35) { grade = 'D — Keep studying';         cls = 'grade-D'; }
+  else                  { grade = 'F — Time to hit the books';  cls = 'grade-F'; }
+  document.getElementById('finalPts').textContent  = state.totalScore;
+  document.getElementById('finalGrade').textContent = grade;
+  document.getElementById('finalGrade').className   = 'grade-label ' + cls;
+  document.getElementById('progressFill').style.width = '100%';
+  show('completeSection');
+}
+
+document.getElementById('wetnessSlider').addEventListener('input', function () {
+  const v = +this.value;
+  document.getElementById('wetnessVal').textContent  = v + '%';
+  document.getElementById('wetnessDesc').textContent = wetnessDesc(v);
+});
+document.getElementById('dynamicSlider').addEventListener('input', function () {
+  const v = +this.value;
+  document.getElementById('dynamicVal').textContent  = v + '%';
+  document.getElementById('dynamicDesc').textContent = dynamicDesc(v);
+});
+document.getElementById('submitBtn').addEventListener('click', submitAnswer);
+document.getElementById('nextBtn').addEventListener('click', nextRound);
+document.getElementById('retryBtn').addEventListener('click', () => { resetState(); startRound(); });
+
+startRound();
+</script>
+</body>
+</html>
