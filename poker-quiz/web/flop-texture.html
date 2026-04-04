@@ -116,8 +116,90 @@ function dealFlop() {
 }
 
 // ─────────────────────────────────────────────
+//  Deck / board utilities
+// ─────────────────────────────────────────────
+
+// Returns the 49 cards not on the flop
+function getRemainingCards(flopCards) {
+  const used = new Set(flopCards.map(c => c.rank + c.suit));
+  const remaining = [];
+  for (const r of RANKS) for (const s of SUITS) {
+    if (!used.has(r + s)) remaining.push({ rank: r, suit: s });
+  }
+  return remaining;
+}
+
+// True if the given rank-index array contains 4 cards that fit in any 5-card
+// straight window (A can count as low = -1 for wheel straights)
+function fourToStraightExists(ranks) {
+  const unique = [...new Set(ranks)];
+  if (unique.includes(12)) unique.push(-1); // Ace low
+  for (let lo = -1; lo <= 8; lo++) {
+    let hits = 0;
+    for (let r = lo; r <= lo + 4; r++) if (unique.includes(r)) hits++;
+    if (hits >= 4) return true;
+  }
+  return false;
+}
+
+// ─────────────────────────────────────────────
+//  Dynamic metric — card enumeration
+//  "How many of the 49 possible turn cards would
+//   change the nuts or the likely best hand?"
+// ─────────────────────────────────────────────
+function calcDynamic(flopCards) {
+  const flopRanks   = flopCards.map(c => RANKS.indexOf(c.rank));
+  const flopSuits   = flopCards.map(c => c.suit);
+  const maxFlopRank = Math.max(...flopRanks);
+  const flopRankSet = new Set(flopRanks);
+
+  const flopSuitCount = {};
+  flopSuits.forEach(s => flopSuitCount[s] = (flopSuitCount[s] || 0) + 1);
+
+  const remaining = getRemainingCards(flopCards); // always 49 cards
+
+  let changingCount = 0;
+  const reasons = { flush: 0, straight: 0, pairsBoard: 0, overcard: 0 };
+
+  for (const turn of remaining) {
+    const tRank = RANKS.indexOf(turn.rank);
+    const tSuit = turn.suit;
+    let changes = false;
+
+    // 1. Flush completing: turn brings 3rd card of a doubly-suited flop
+    if ((flopSuitCount[tSuit] || 0) >= 2) {
+      changes = true; reasons.flush++;
+    }
+
+    // 2. Straight draw: turn creates a 4-to-a-straight on the 4-card board
+    //    (check the board after the turn — the flop alone can't have 4-to-straight)
+    if (fourToStraightExists([...flopRanks, tRank])) {
+      changes = true; reasons.straight++;
+    }
+
+    // 3. Pairs the board (changes top pair, enables FH/quads)
+    if (flopRankSet.has(tRank)) {
+      changes = true; reasons.pairsBoard++;
+    }
+
+    // 4. New overcard (changes what top pair is)
+    if (tRank > maxFlopRank) {
+      changes = true; reasons.overcard++;
+    }
+
+    if (changes) changingCount++;
+  }
+
+  return {
+    dynamic: Math.round((changingCount / remaining.length) * 100),
+    changingCount,
+    totalTurnCards: remaining.length,
+    reasons,
+  };
+}
+
+// ─────────────────────────────────────────────
 //  Analysis engine
-//  NOTE: placeholder metrics — will be refined
 // ─────────────────────────────────────────────
 function analyzeFlop(cards) {
   const rankIdx = r => RANKS.indexOf(r);
@@ -178,28 +260,27 @@ function analyzeFlop(cards) {
   const isTrips  = sorted[0] === sorted[1] && sorted[1] === sorted[2];
   const pairWetPenalty = isTrips ? 25 : isPaired ? 12 : 0;
 
-  // ── Wetness ──
+  // ── Wetness (heuristic — user will supply real metric later) ──
   const wetness = Math.max(0, Math.min(100,
     flushPts + straightPts + rankPts - pairWetPenalty
   ));
 
-  // ── Dynamic ──
-  // Dynamic = how much will equity shift on turn / river
-  // More draws → more dynamic; paired board → more static; monotone → slightly less dynamic
-  const pairDynPenalty    = isTrips ? 40 : isPaired ? 20 : 0;
-  const monotonePenalty   = maxSuit === 3 ? 8 : 0;   // flush already in; less build-up on later streets
-  const dynamic = Math.max(0, Math.min(100,
-    flushPts + straightPts + rankPts - pairDynPenalty - monotonePenalty
-  ));
+  // ── Dynamic (card enumeration) ──
+  const dynResult = calcDynamic(cards);
 
   return {
-    wetness, dynamic,
+    wetness,
+    dynamic: dynResult.dynamic,
     breakdown: {
+      // wetness factors
       flushPts, flushLabel: suitLabel,
       straightPts, straightNotes,
       rankPts, medianRank,
-      pairWetPenalty, pairDynPenalty, monotonePenalty,
-      isPaired, isTrips, maxSuit,
+      pairWetPenalty, isPaired, isTrips,
+      // dynamic factors
+      dynChanging: dynResult.changingCount,
+      dynTotal: dynResult.totalTurnCards,
+      dynReasons: dynResult.reasons,
     }
   };
 }
@@ -350,42 +431,53 @@ function submitAnswer() {
 
   // Breakdown
   const b = breakdown;
-  const rows = [
-    {
-      label: `Flush draws: ${b.flushLabel}`,
-      pts: b.flushPts,
-      neg: false,
-    },
+
+  // Wetness rows (heuristic)
+  const wetRows = [
+    { label: `Flush draws: ${b.flushLabel}`, pts: b.flushPts, neg: false },
     {
       label: b.straightNotes.length
-        ? `Straight draws: ${b.straightNotes.slice(0, 2).join(', ')}`
-        : 'Straight draws: None',
-      pts: b.straightPts,
-      neg: false,
+        ? `Connectivity: ${b.straightNotes.slice(0, 2).join(', ')}`
+        : 'Connectivity: None',
+      pts: b.straightPts, neg: false,
     },
     {
-      label: `Board rank: ${b.rankPts > 0 ? 'Low/mid cards (' + RANKS[b.medianRank] + ' median)' : 'High cards (' + RANKS[b.medianRank] + ' median)'}`,
-      pts: b.rankPts,
-      neg: false,
+      label: `Board rank: ${b.rankPts > 0
+        ? 'Low/mid (' + RANKS[b.medianRank] + ' median)'
+        : 'High (' + RANKS[b.medianRank] + ' median)'}`,
+      pts: b.rankPts, neg: false,
     },
   ];
-  if (b.pairWetPenalty > 0) rows.push({
-    label: b.isTrips ? 'Trips on board (dry penalty)' : 'Paired board (dry penalty)',
-    pts: -b.pairWetPenalty,
-    neg: true,
-  });
-  if (b.monotonePenalty > 0) rows.push({
-    label: 'Monotone (dynamic penalty)',
-    pts: -b.monotonePenalty,
-    neg: true,
+  if (b.pairWetPenalty > 0) wetRows.push({
+    label: b.isTrips ? 'Trips on board' : 'Paired board',
+    pts: -b.pairWetPenalty, neg: true,
   });
 
+  // Dynamic rows (card enumeration)
+  const r = b.dynReasons;
+  const dynRows = [
+    { label: 'Flush-completing turns',  count: r.flush      },
+    { label: '4-to-straight turns',     count: r.straight   },
+    { label: 'Board-pairing turns',     count: r.pairsBoard },
+    { label: 'New overcard turns',      count: r.overcard   },
+  ].filter(row => row.count > 0);
+
   document.getElementById('breakdown').innerHTML = `
-    <h3>Score Breakdown</h3>
-    ${rows.map(r => `
+    <h3>Wetness — heuristic</h3>
+    ${wetRows.map(row => `
       <div class="breakdown-item">
-        <span>${r.label}</span>
-        <span class="breakdown-pts ${r.neg ? 'neg' : ''}">${r.neg ? '' : '+'}${r.pts}</span>
+        <span>${row.label}</span>
+        <span class="breakdown-pts ${row.neg ? 'neg' : ''}">${row.neg ? '' : '+'}${row.pts}</span>
+      </div>`).join('')}
+    <h3 style="margin-top:14px;">Dynamism — turn card analysis</h3>
+    <div class="breakdown-item" style="font-size:14px;font-weight:600;">
+      <span>Changing turns</span>
+      <span class="breakdown-pts">${b.dynChanging} / ${b.dynTotal}</span>
+    </div>
+    ${dynRows.map(row => `
+      <div class="breakdown-item" style="padding-left:10px;">
+        <span style="color:var(--text-muted);">${row.label}</span>
+        <span style="color:var(--text-muted);font-size:12px;">${row.count} cards</span>
       </div>`).join('')}`;
 
   // Round score line
