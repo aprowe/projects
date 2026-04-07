@@ -1,0 +1,678 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SimShampoo</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: #0d0820;
+  display: flex; justify-content: center; align-items: center;
+  height: 100vh; overflow: hidden;
+  font-family: Arial, sans-serif;
+}
+canvas { cursor: none; border-radius: 12px; box-shadow: 0 0 60px #6622aa44; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const c = document.getElementById('c');
+const ctx = c.getContext('2d');
+const W = 800, H = 600;
+c.width = W; c.height = H;
+
+// Constants
+const HX = 400, HY = 320, HR = 85;
+const HZ = { cx: 400, cy: 215, rx: 95, ry: 115 };
+
+// State
+let money = 0, day = 1, dayRev = 0;
+let phase = 'idle';
+let cust = null;
+let foam = [], dirt = [], drops = [], sparks = [];
+let coverage = 0, rinseT = 0;
+let todayCusts = 0, maxCusts = 3;
+let nextCustTimer = 0;
+let shopOpen = false;
+let msgText = '', msgTimer = 0;
+let lastTs = 0;
+const mouse = { x: 300, y: 300, down: false };
+
+// Upgrades
+const UPG = [
+  { key:'size',  name:'Luxury Foam',  desc:'Bigger bubbles',          lv:0, max:3, costs:[30,60,120] },
+  { key:'speed', name:'Quick Lather', desc:'More foam per stroke',    lv:0, max:3, costs:[40,80,150] },
+  { key:'tips',  name:'VIP Service',  desc:'+$5 tip per level',       lv:0, max:3, costs:[50,100,200] },
+  { key:'wait',  name:'Comfy Chairs', desc:'Customers wait 50% more', lv:0, max:2, costs:[60,130] },
+];
+const upg = {};
+for (const u of UPG) upg[u.key] = u;
+
+// Customer types
+const TYPES = [
+  { name:'Curly Quinn', skin:'#FDBCB4', hair:'#8B3A3A', type:'curly',  dirtness:0.7 },
+  { name:'Wavy Dave',   skin:'#DEB887', hair:'#3d2000', type:'wavy',   dirtness:0.5 },
+  { name:'Spiky Ren',   skin:'#FDBCB4', hair:'#cc2200', type:'spiky',  dirtness:0.9 },
+  { name:'Fluffy Mia',  skin:'#FDEBD0', hair:'#7c3fa0', type:'fluffy', dirtness:0.65 },
+  { name:'Long Luna',   skin:'#F5CBA7', hair:'#1a0800', type:'long',   dirtness:0.8 },
+  { name:'Bob Rex',     skin:'#DEB887', hair:'#1a2050', type:'bob',    dirtness:0.4 },
+];
+
+// Helpers
+const rand = (a, b) => a + Math.random() * (b - a);
+const randInt = (a, b) => Math.floor(rand(a, b));
+const dist = (ax, ay, bx, by) => Math.hypot(ax - bx, ay - by);
+
+function inHairZone(x, y) {
+  if (!cust) return false;
+  const dx = x - (HZ.cx + (cust.x - HX)), dy = y - HZ.cy;
+  return (dx / HZ.rx) ** 2 + (dy / HZ.ry) ** 2 <= 1;
+}
+
+function showMsg(text, dur = 2500) { msgText = text; msgTimer = dur; }
+function foamRadius() { return 18 + upg.size.lv * 7; }
+function foamRate()   { return 3  + upg.speed.lv * 2; }
+function patience()   { return 15000 * (1 + upg.wait.lv * 0.5); }
+
+function spawnCustomer() {
+  if (todayCusts >= maxCusts) { phase = 'dayend'; return; }
+  const t = TYPES[randInt(0, TYPES.length)];
+  cust = { ...t, x: -180, targetX: HX, pat: patience(), patMax: patience() };
+  const n = Math.round(t.dirtness * 55 + 15);
+  dirt = [];
+  for (let i = 0; i < n; i++) {
+    const a = rand(0, Math.PI * 2), r = Math.sqrt(Math.random());
+    dirt.push({
+      x: HZ.cx + Math.cos(a) * HZ.rx * 0.88 * r,
+      y: HZ.cy + Math.sin(a) * HZ.ry * 0.88 * r,
+      r: rand(2.5, 5), cleaned: false
+    });
+  }
+  foam = []; drops = []; sparks = [];
+  coverage = 0; rinseT = 0;
+  todayCusts++;
+  phase = 'entering';
+}
+
+function addFoam(x, y) {
+  const fs = foamRadius(), fr = foamRate();
+  for (let i = 0; i < fr; i++) {
+    foam.push({
+      x: x + rand(-fs * 0.6, fs * 0.6),
+      y: y + rand(-fs * 0.6, fs * 0.6),
+      r: rand(fs * 0.5, fs),
+      alpha: rand(0.7, 0.9),
+      wb: rand(0, Math.PI * 2),
+      wbs: rand(0.02, 0.05),
+    });
+    if (foam.length > 700) foam.shift();
+  }
+}
+
+function checkCoverage() {
+  let cleaned = 0;
+  const ox = cust.x - HX;
+  for (const d of dirt) {
+    if (d.cleaned) { cleaned++; continue; }
+    const dx = d.x + ox, dy = d.y;
+    for (const f of foam) {
+      if (dist(f.x, f.y, dx, dy) < f.r + d.r * 0.5) {
+        d.cleaned = true; cleaned++; break;
+      }
+    }
+  }
+  coverage = dirt.length ? cleaned / dirt.length : 0;
+}
+
+// Update
+function update(dt) {
+  if (msgTimer > 0) msgTimer -= dt;
+  for (const f of foam) f.wb += f.wbs;
+
+  if (phase === 'entering') {
+    cust.x += (cust.targetX - cust.x) * 0.1;
+    if (Math.abs(cust.x - cust.targetX) < 1) {
+      cust.x = cust.targetX;
+      phase = 'shampooing';
+      showMsg('Click and drag on the hair to shampoo ' + cust.name + '!');
+    }
+  }
+
+  if (phase === 'shampooing') {
+    cust.pat -= dt;
+    if (cust.pat <= 0) {
+      phase = 'leaving';
+      showMsg(cust.name + ' got tired of waiting and left!', 2500);
+      return;
+    }
+    if (mouse.down && inHairZone(mouse.x, mouse.y)) addFoam(mouse.x, mouse.y);
+    checkCoverage();
+  }
+
+  if (phase === 'rinsing') {
+    rinseT += dt / 2800;
+    if (rinseT >= 1) {
+      rinseT = 1;
+      const earned = Math.round(10 + coverage * 25 + upg.tips.lv * 5);
+      money += earned; dayRev += earned;
+      showMsg('Squeaky clean! +$' + earned, 2500);
+      for (let i = 0; i < 22; i++) {
+        sparks.push({
+          x: rand(310, 490), y: rand(150, 330),
+          vx: rand(-3.5, 3.5), vy: rand(-5.5, -0.5),
+          life: 1,
+          color: 'hsl(' + randInt(0, 360) + ',100%,70%)'
+        });
+      }
+      phase = 'complete';
+    }
+    for (const f of foam) f.alpha = Math.max(0, f.alpha - dt * 0.0018);
+    if (Math.random() < 0.35) {
+      drops.push({ x: rand(HX - 85, HX + 85), y: HZ.cy - 55, vy: rand(5, 11), alpha: 0.9 });
+    }
+    for (const d of drops) { d.y += d.vy; d.alpha -= 0.022; }
+    drops = drops.filter(d => d.alpha > 0);
+  }
+
+  if (phase === 'complete') {
+    for (const s of sparks) { s.x += s.vx; s.y += s.vy; s.vy += 0.18; s.life -= 0.022; }
+    sparks = sparks.filter(s => s.life > 0);
+    nextCustTimer += dt;
+    if (nextCustTimer > 2000) { nextCustTimer = 0; spawnCustomer(); }
+  }
+
+  if (phase === 'leaving') {
+    cust.x += 9;
+    if (cust.x > W + 180) spawnCustomer();
+  }
+}
+
+// ---- Drawing ----
+function rr(x, y, w, h, rad, fill, strokeCol, strokeW) {
+  ctx.beginPath(); ctx.roundRect(x, y, w, h, rad);
+  if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+  if (strokeCol) { ctx.strokeStyle = strokeCol; ctx.lineWidth = strokeW || 2; ctx.stroke(); }
+}
+
+function drawBg() {
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, '#140826'); g.addColorStop(1, '#241050');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+}
+
+function drawBottle(x, y, color) {
+  rr(x - 11, y, 22, 38, 5, color);
+  rr(x - 7, y + 5, 7, 18, 3, '#ffffff33');
+  ctx.fillStyle = '#ffffffaa'; ctx.fillRect(x - 2, y - 13, 4, 14);
+  ctx.beginPath(); ctx.arc(x - 2, y - 13, 4, 0, Math.PI * 2);
+  ctx.fillStyle = '#ffffffaa'; ctx.fill();
+}
+
+function drawSalon() {
+  // Floor
+  ctx.fillStyle = '#22104a'; ctx.fillRect(0, H - 70, W, 70);
+  ctx.fillStyle = '#2e1560'; ctx.fillRect(0, H - 73, W, 5);
+
+  // Chair
+  rr(315, 395, 170, 92, 10, '#b03020');
+  rr(325, 318, 150, 84, 10, '#d94030');
+  ctx.fillStyle = '#808080'; ctx.fillRect(387, 487, 26, 55);
+  ctx.fillRect(360, 540, 80, 10);
+
+  // Left shelf unit
+  rr(15, 188, 118, 285, 6, '#2e1450');
+  rr(10, 182, 128, 13, 4, '#3e1e68');
+  rr(10, 298, 128, 13, 4, '#3e1e68');
+  drawBottle(46, 222, '#e74c3c');
+  drawBottle(85, 222, '#3498db');
+  drawBottle(122, 222, '#2ecc71');
+  drawBottle(62, 318, '#9b59b6');
+  drawBottle(106, 318, '#e67e22');
+
+  // Mirror
+  rr(178, 88, 214, 294, 8, '#0a0420', '#7a3fb0', 5);
+  rr(188, 98, 95, 278, 5, 'rgba(160,80,255,0.07)');
+
+  // Window right
+  rr(598, 118, 164, 205, 4, '#070314', '#3e2070', 7);
+  ctx.strokeStyle = '#3e2070'; ctx.lineWidth = 7;
+  ctx.beginPath(); ctx.moveTo(680, 118); ctx.lineTo(680, 323);
+  ctx.moveTo(598, 220); ctx.lineTo(762, 220); ctx.stroke();
+  // Moon glow in window
+  const wg = ctx.createRadialGradient(720, 160, 5, 720, 160, 80);
+  wg.addColorStop(0, 'rgba(200,180,255,0.18)'); wg.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = wg; ctx.fillRect(598, 118, 164, 205);
+
+  // Neon sign
+  ctx.save();
+  const pulse = 0.68 + Math.sin(Date.now() * 0.0028) * 0.32;
+  ctx.globalAlpha = pulse;
+  ctx.shadowBlur = 28; ctx.shadowColor = '#ff00ff';
+  ctx.fillStyle = '#ff55ff';
+  ctx.font = 'bold 29px Arial'; ctx.textAlign = 'center';
+  ctx.fillText('SimShampoo', 648, 82);
+  ctx.restore();
+}
+
+function drawHair(x, y) {
+  ctx.fillStyle = cust.hair;
+  const top = y - HR;
+  switch (cust.type) {
+    case 'curly':
+      for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * Math.PI;
+        ctx.beginPath();
+        ctx.arc(x + Math.cos(a + Math.PI) * 58, top + 22 + Math.sin(a) * 28, 31, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.beginPath(); ctx.arc(x - 43, top - 8, 33, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(x,     top - 22, 33, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(x + 43, top - 8, 33, 0, Math.PI * 2); ctx.fill();
+      break;
+    case 'wavy':
+      ctx.beginPath(); ctx.arc(x, y - HR * 0.42, HR + 17, Math.PI, 0, false); ctx.fill();
+      [-1, 1].forEach(s => {
+        ctx.beginPath(); ctx.moveTo(x + s * (HR - 3), y - HR * 0.42 + 8);
+        for (let i = 0; i < 4; i++) {
+          ctx.quadraticCurveTo(x + s*(HR+22), y + i*38 + 8, x + s*(HR-3), y + (i+1)*38);
+        }
+        ctx.lineTo(x + s*(HR-3), y - HR*0.42 + 8); ctx.fill();
+      });
+      break;
+    case 'spiky':
+      ctx.beginPath(); ctx.arc(x, y - HR*0.44, HR+12, Math.PI, 0, false); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(x - 82, y - 20);
+      for (let i = 0; i < 6; i++) {
+        const px = x - 82 + i * 28;
+        ctx.lineTo(px + 14, top - 12 - (i % 2 === 0 ? 48 : 18));
+        ctx.lineTo(px + 28, y - 20);
+      }
+      ctx.closePath(); ctx.fill();
+      break;
+    case 'fluffy':
+      ctx.beginPath(); ctx.arc(x, y - 28, HR + 44, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = cust.hair + 'aa';
+      for (let i = 0; i < 14; i++) {
+        const a = (i / 14) * Math.PI * 2, rr2 = HR + 30;
+        ctx.beginPath();
+        ctx.arc(x + Math.cos(a)*rr2*0.72, y - 28 + Math.sin(a)*rr2*0.72, 22, 0, Math.PI*2);
+        ctx.fill();
+      }
+      break;
+    case 'long':
+      ctx.beginPath();
+      ctx.moveTo(x - HR + 8, top + 25);
+      ctx.bezierCurveTo(x - HR - 34, y + 52, x - HR - 20, y + 140, x - 64, y + 192);
+      ctx.bezierCurveTo(x - 26, y + 207, x + 26, y + 207, x + 64, y + 192);
+      ctx.bezierCurveTo(x + HR + 20, y + 140, x + HR + 34, y + 52, x + HR - 8, top + 25);
+      ctx.arc(x, y - HR*0.42, HR + 8, Math.PI*1.1, Math.PI*1.9, false);
+      ctx.fill();
+      ctx.beginPath(); ctx.arc(x, y - HR*0.42, HR + 8, Math.PI, 0, false); ctx.fill();
+      break;
+    case 'bob':
+      ctx.beginPath();
+      ctx.moveTo(x - HR - 18, y - 14);
+      ctx.bezierCurveTo(x - HR - 18, y + 84, x - 48, y + 100, x, y + 96);
+      ctx.bezierCurveTo(x + 48, y + 100, x + HR + 18, y + 84, x + HR + 18, y - 14);
+      ctx.arc(x, y - HR*0.36, HR + 18, 0, Math.PI, true);
+      ctx.fill();
+      break;
+  }
+}
+
+function drawCustomer() {
+  if (!cust) return;
+  const x = cust.x, y = HY;
+  // Body
+  rr(x - 56, y + 78, 112, 115, 12, '#221048');
+  // Neck
+  ctx.fillStyle = cust.skin; ctx.fillRect(x - 14, y + 68, 28, 28);
+  // Ears (behind head)
+  ctx.fillStyle = cust.skin;
+  ctx.beginPath(); ctx.ellipse(x - HR + 7, y, 13, 20, 0, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(x + HR - 7, y, 13, 20, 0, 0, Math.PI*2); ctx.fill();
+  // Head
+  ctx.fillStyle = cust.skin;
+  ctx.beginPath(); ctx.arc(x, y, HR, 0, Math.PI*2); ctx.fill();
+  // Hair on top of head
+  drawHair(x, y);
+  // Eyes
+  ctx.fillStyle = '#1a0a05';
+  ctx.beginPath(); ctx.ellipse(x - 25, y - 13, 7, 9, 0, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(x + 25, y - 13, 7, 9, 0, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#fff';
+  ctx.beginPath(); ctx.arc(x - 22, y - 16, 2.5, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(x + 28, y - 16, 2.5, 0, Math.PI*2); ctx.fill();
+  // Mouth
+  const pr = cust.pat / cust.patMax;
+  ctx.strokeStyle = '#3a1000'; ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  if (pr > 0.55) ctx.arc(x, y + 28, 17, 0.2, Math.PI - 0.2);
+  else if (pr > 0.25) { ctx.moveTo(x - 16, y + 37); ctx.lineTo(x + 16, y + 37); }
+  else ctx.arc(x, y + 54, 17, Math.PI + 0.2, -0.2);
+  ctx.stroke();
+}
+
+function drawDirt() {
+  if (!cust) return;
+  const ox = cust.x - HX;
+  for (const d of dirt) {
+    if (d.cleaned) continue;
+    ctx.fillStyle = '#2a1000';
+    ctx.beginPath(); ctx.arc(d.x + ox, d.y, d.r, 0, Math.PI*2); ctx.fill();
+  }
+}
+
+function drawFoam() {
+  for (const f of foam) {
+    if (f.alpha <= 0) continue;
+    ctx.save();
+    ctx.globalAlpha = f.alpha;
+    const g = ctx.createRadialGradient(f.x - f.r*0.3, f.y - f.r*0.3, 0, f.x, f.y, f.r);
+    g.addColorStop(0, '#ffffff');
+    g.addColorStop(0.5, '#ddeeff');
+    g.addColorStop(1, '#aabbff44');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(f.x + Math.sin(f.wb)*1.2, f.y + Math.cos(f.wb*0.8)*0.8, f.r, 0, Math.PI*2);
+    ctx.fill();
+    ctx.globalAlpha = f.alpha * 0.5;
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath(); ctx.arc(f.x - f.r*0.3, f.y - f.r*0.3, f.r*0.22, 0, Math.PI*2); ctx.fill();
+    ctx.restore();
+  }
+}
+
+function drawDrops() {
+  for (const d of drops) {
+    ctx.save(); ctx.globalAlpha = d.alpha;
+    ctx.fillStyle = '#77bbff';
+    ctx.beginPath(); ctx.ellipse(d.x, d.y, 3, 7, 0, 0, Math.PI*2); ctx.fill();
+    ctx.restore();
+  }
+}
+
+function drawSparks() {
+  for (const s of sparks) {
+    ctx.save(); ctx.globalAlpha = s.life;
+    ctx.shadowBlur = 8; ctx.shadowColor = s.color;
+    ctx.fillStyle = s.color;
+    ctx.beginPath(); ctx.arc(s.x, s.y, 5, 0, Math.PI*2); ctx.fill();
+    ctx.restore();
+  }
+}
+
+function drawHUD() {
+  if (!cust || phase === 'dayend') return;
+
+  // Money
+  rr(10, 10, 155, 46, 10, '#3a1268');
+  ctx.fillStyle = '#f1c40f'; ctx.font = 'bold 22px Arial'; ctx.textAlign = 'left';
+  ctx.fillText('$ ' + money, 22, 42);
+
+  // Day
+  rr(174, 10, 118, 46, 10, '#163060');
+  ctx.fillStyle = '#fff'; ctx.font = 'bold 19px Arial'; ctx.textAlign = 'center';
+  ctx.fillText('Day ' + day, 233, 42);
+
+  // Customer name
+  rr(302, 10, 218, 46, 10, '#00000060');
+  ctx.fillStyle = '#fff'; ctx.font = 'bold 17px Arial'; ctx.textAlign = 'center';
+  ctx.fillText(cust.name, 411, 42);
+
+  // Lather meter
+  rr(530, 10, 210, 46, 10, '#00000060');
+  ctx.fillStyle = '#aac8ff'; ctx.font = '13px Arial'; ctx.textAlign = 'left';
+  ctx.fillText('Lather:', 544, 29);
+  rr(544, 33, 178, 16, 7, '#181830');
+  const cc = coverage > 0.7 ? '#2ecc71' : coverage > 0.4 ? '#f39c12' : '#3498db';
+  if (coverage > 0) rr(544, 33, 178 * Math.min(coverage, 1), 16, 7, cc);
+  ctx.fillStyle = '#fff'; ctx.font = 'bold 12px Arial'; ctx.textAlign = 'center';
+  ctx.fillText(Math.round(coverage * 100) + '%', 633, 44);
+
+  // Patience bar
+  if (phase === 'shampooing') {
+    const pr = cust.pat / cust.patMax;
+    rr(315, 572, 170, 14, 7, '#18183060');
+    const pc = pr > 0.5 ? '#2ecc71' : pr > 0.25 ? '#f39c12' : '#e74c3c';
+    if (pr > 0) rr(315, 572, 170 * pr, 14, 7, pc);
+    ctx.fillStyle = '#ffffff80'; ctx.font = '11px Arial'; ctx.textAlign = 'center';
+    ctx.fillText('Patience', 400, 569);
+  }
+
+  // Rinse button
+  if (phase === 'shampooing' && coverage >= 0.65) {
+    const p = 0.72 + Math.sin(Date.now() * 0.007) * 0.28;
+    ctx.save();
+    ctx.shadowBlur = 22 * p; ctx.shadowColor = '#00aaff';
+    rr(632, 503, 148, 62, 14, 'rgba(0,125,210,' + p + ')');
+    ctx.restore();
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 24px Arial'; ctx.textAlign = 'center';
+    ctx.fillText('Rinse!', 706, 542);
+  }
+
+  // Rinsing bar
+  if (phase === 'rinsing') {
+    rr(238, 503, 324, 52, 12, '#00000070');
+    rr(244, 509, 312 * rinseT, 40, 9, '#2471a3');
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 20px Arial'; ctx.textAlign = 'center';
+    ctx.fillText('Rinsing...', 400, 537);
+  }
+
+  // Shop button
+  rr(10, 64, 95, 38, 8, '#6a2a90');
+  ctx.fillStyle = '#fff'; ctx.font = 'bold 15px Arial'; ctx.textAlign = 'center';
+  ctx.fillText('Shop', 57, 89);
+
+  // Client counter
+  rr(10, 110, 145, 28, 6, '#00000050');
+  ctx.fillStyle = '#ccc'; ctx.font = '13px Arial'; ctx.textAlign = 'left';
+  ctx.fillText('Clients: ' + todayCusts + '/' + maxCusts, 18, 130);
+
+  // Message popup
+  if (msgTimer > 0 && msgText) {
+    const a = Math.min(1, msgTimer / 350);
+    const tw = ctx.measureText(msgText).width;
+    const pw = Math.max(tw + 50, 300);
+    ctx.save(); ctx.globalAlpha = a;
+    rr(W/2 - pw/2, H/2 - 34, pw, 68, 14, '#000000bb');
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 20px Arial'; ctx.textAlign = 'center';
+    ctx.fillText(msgText, W/2, H/2 + 9);
+    ctx.restore();
+  }
+}
+
+function drawDayEnd() {
+  ctx.fillStyle = '#00000088'; ctx.fillRect(0, 0, W, H);
+  ctx.textAlign = 'center';
+  ctx.save();
+  ctx.shadowBlur = 20; ctx.shadowColor = '#f1c40f';
+  ctx.fillStyle = '#f1c40f'; ctx.font = 'bold 52px Arial';
+  ctx.fillText('Day ' + day + ' Complete!', W/2, 188);
+  ctx.restore();
+  ctx.fillStyle = '#2ecc71'; ctx.font = 'bold 32px Arial';
+  ctx.fillText('Revenue: $' + dayRev, W/2, 256);
+  ctx.fillStyle = '#ccc'; ctx.font = '24px Arial';
+  ctx.fillText('Total: $' + money, W/2, 302);
+
+  rr(W/2-130, 358, 260, 64, 15, '#7a28b0');
+  ctx.fillStyle = '#fff'; ctx.font = 'bold 27px Arial'; ctx.textAlign = 'center';
+  ctx.fillText('Next Day >', W/2, 399);
+
+  rr(W/2-108, 438, 216, 58, 12, '#1a4a80');
+  ctx.fillStyle = '#fff'; ctx.font = 'bold 22px Arial';
+  ctx.fillText('Shop', W/2, 474);
+}
+
+function drawShop() {
+  ctx.fillStyle = '#000000aa'; ctx.fillRect(0, 0, W, H);
+  rr(88, 42, 624, 518, 20, '#2a1060', '#6a30a0', 2);
+  ctx.fillStyle = '#fff'; ctx.font = 'bold 32px Arial'; ctx.textAlign = 'center';
+  ctx.fillText('Upgrade Shop', W/2, 98);
+  ctx.fillStyle = '#f1c40f'; ctx.font = 'bold 22px Arial';
+  ctx.fillText('$ ' + money, W/2, 132);
+
+  UPG.forEach((u, i) => {
+    const bx = 118, by = 156 + i * 96, bw = 564, bh = 82;
+    const maxed = u.lv >= u.max, can = !maxed && money >= u.costs[u.lv];
+    rr(bx, by, bw, bh, 12, maxed ? '#0d3a20' : can ? '#102050' : '#1e0e38');
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 20px Arial'; ctx.textAlign = 'left';
+    ctx.fillText(u.name, bx + 18, by + 30);
+    ctx.fillStyle = '#aaa'; ctx.font = '15px Arial';
+    ctx.fillText(u.desc, bx + 18, by + 56);
+    ctx.textAlign = 'right';
+    ctx.fillStyle = '#f1c40f'; ctx.font = '20px Arial';
+    let stars = '';
+    for (let j = 0; j < u.max; j++) stars += j < u.lv ? '★' : '☆';
+    ctx.fillText(stars, bx + bw - 15, by + 30);
+    if (maxed) {
+      ctx.fillStyle = '#2ecc71'; ctx.font = 'bold 16px Arial';
+      ctx.fillText('MAXED', bx + bw - 15, by + 58);
+    } else {
+      ctx.fillStyle = can ? '#f1c40f' : '#777'; ctx.font = 'bold 17px Arial';
+      ctx.fillText('$' + u.costs[u.lv], bx + bw - 15, by + 58);
+    }
+  });
+
+  rr(W/2-88, 546, 176, 48, 12, '#902020');
+  ctx.fillStyle = '#fff'; ctx.font = 'bold 21px Arial'; ctx.textAlign = 'center';
+  ctx.fillText('Close', W/2, 577);
+}
+
+function drawCursor() {
+  ctx.save();
+  if (phase === 'shampooing' && inHairZone(mouse.x, mouse.y)) {
+    ctx.fillStyle = mouse.down ? '#33aaff' : '#99ddff';
+    ctx.shadowBlur = mouse.down ? 18 : 7;
+    ctx.shadowColor = '#00aaff';
+    ctx.beginPath(); ctx.arc(mouse.x, mouse.y, mouse.down ? 16 : 11, 0, Math.PI*2); ctx.fill();
+    if (mouse.down) {
+      ctx.fillStyle = '#ffffff55';
+      ctx.beginPath(); ctx.arc(mouse.x - 5, mouse.y - 5, 4, 0, Math.PI*2); ctx.fill();
+    }
+  } else {
+    ctx.fillStyle = '#ffffffcc';
+    ctx.beginPath();
+    ctx.moveTo(mouse.x, mouse.y);
+    ctx.lineTo(mouse.x + 11, mouse.y + 16);
+    ctx.lineTo(mouse.x + 5, mouse.y + 13);
+    ctx.lineTo(mouse.x + 8, mouse.y + 21);
+    ctx.lineTo(mouse.x + 5, mouse.y + 22);
+    ctx.lineTo(mouse.x + 2, mouse.y + 14);
+    ctx.lineTo(mouse.x - 3, mouse.y + 18);
+    ctx.closePath(); ctx.fill();
+  }
+  ctx.restore();
+}
+
+// Input handling
+function getPos(e) {
+  const r = c.getBoundingClientRect();
+  const src = e.touches ? e.touches[0] : e;
+  return {
+    x: (src.clientX - r.left) * (W / r.width),
+    y: (src.clientY - r.top) * (H / r.height)
+  };
+}
+
+c.addEventListener('mousemove', e => { const p = getPos(e); mouse.x = p.x; mouse.y = p.y; });
+c.addEventListener('mousedown', e => {
+  mouse.down = true;
+  const p = getPos(e); mouse.x = p.x; mouse.y = p.y;
+  handleClick(p.x, p.y);
+});
+c.addEventListener('mouseup', () => mouse.down = false);
+c.addEventListener('mouseleave', () => mouse.down = false);
+c.addEventListener('touchstart', e => {
+  e.preventDefault(); mouse.down = true;
+  const p = getPos(e); mouse.x = p.x; mouse.y = p.y;
+  handleClick(p.x, p.y);
+}, { passive: false });
+c.addEventListener('touchmove', e => {
+  e.preventDefault();
+  const p = getPos(e); mouse.x = p.x; mouse.y = p.y;
+}, { passive: false });
+c.addEventListener('touchend', e => { e.preventDefault(); mouse.down = false; }, { passive: false });
+
+function handleClick(cx, cy) {
+  // Shop overlay
+  if (shopOpen) {
+    if (cx >= W/2-88 && cx <= W/2+88 && cy >= 546 && cy <= 594) { shopOpen = false; return; }
+    UPG.forEach((u, i) => {
+      const by = 156 + i * 96;
+      if (cx >= 118 && cx <= 682 && cy >= by && cy <= by + 82) {
+        if (u.lv >= u.max) { showMsg('Already maxed!', 1200); return; }
+        if (money < u.costs[u.lv]) { showMsg('Need $' + u.costs[u.lv] + '!', 1200); return; }
+        money -= u.costs[u.lv]; u.lv++;
+        showMsg(u.name + ' upgraded!', 2000);
+      }
+    });
+    return;
+  }
+
+  // Top-left shop button
+  if (cx >= 10 && cx <= 105 && cy >= 64 && cy <= 102) { shopOpen = true; return; }
+
+  // Rinse button
+  if (phase === 'shampooing' && coverage >= 0.65 &&
+      cx >= 632 && cx <= 780 && cy >= 503 && cy <= 565) {
+    phase = 'rinsing'; return;
+  }
+
+  // Day end buttons
+  if (phase === 'dayend') {
+    if (cx >= W/2-130 && cx <= W/2+130 && cy >= 358 && cy <= 422) {
+      day++;
+      maxCusts = Math.min(3 + Math.floor(day * 0.75), 8);
+      todayCusts = 0; dayRev = 0;
+      spawnCustomer(); return;
+    }
+    if (cx >= W/2-108 && cx <= W/2+108 && cy >= 438 && cy <= 496) {
+      shopOpen = true; return;
+    }
+  }
+}
+
+// Main loop
+function loop(ts) {
+  const dt = Math.min(ts - lastTs, 50);
+  lastTs = ts;
+
+  update(dt);
+
+  drawBg();
+  drawSalon();
+
+  if (cust && phase !== 'dayend') {
+    drawCustomer();
+    drawDirt();
+    drawFoam();
+    drawDrops();
+    drawSparks();
+    drawHUD();
+  }
+
+  if (phase === 'dayend') drawDayEnd();
+  if (shopOpen) drawShop();
+
+  drawCursor();
+
+  requestAnimationFrame(loop);
+}
+
+// Resize canvas to fit window while maintaining aspect ratio
+function resize() {
+  const scale = Math.min(window.innerWidth / W, window.innerHeight / H);
+  c.style.width  = Math.floor(W * scale) + 'px';
+  c.style.height = Math.floor(H * scale) + 'px';
+}
+window.addEventListener('resize', resize);
+resize();
+
+spawnCustomer();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

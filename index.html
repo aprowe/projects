@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Projects</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0d0820;
+    color: #fff;
+    font-family: Arial, sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 60px 20px;
+  }
+  h1 {
+    font-size: 3rem;
+    color: #ff66ff;
+    text-shadow: 0 0 30px #ff00ff88, 0 0 60px #ff00ff44;
+    margin-bottom: 12px;
+    letter-spacing: 2px;
+  }
+  p.subtitle { color: #9977cc; font-size: 1.1rem; margin-bottom: 50px; }
+  .grid { display: flex; flex-wrap: wrap; gap: 24px; justify-content: center; max-width: 800px; }
+  .card {
+    background: #1a0a35;
+    border: 1px solid #4a2a80;
+    border-radius: 16px;
+    padding: 32px;
+    width: 320px;
+    text-decoration: none;
+    color: inherit;
+    transition: transform 0.2s, box-shadow 0.2s, border-color 0.2s;
+    position: relative;
+  }
+  .card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 12px 40px #6622aa44;
+    border-color: #9b59b6;
+  }
+  .card h2 { font-size: 1.5rem; color: #cc88ff; margin-bottom: 8px; }
+  .card p { color: #9977cc; font-size: 0.95rem; line-height: 1.5; }
+  .badge {
+    position: absolute;
+    top: 16px; right: 16px;
+    background: #2d1555;
+    color: #9977cc;
+    font-size: 0.75rem;
+    padding: 4px 10px;
+    border-radius: 20px;
+    border: 1px solid #4a2a80;
+  }
+  .badge.live { background: #0d3320; color: #2ecc71; border-color: #2ecc71; }
+  .emoji { font-size: 2.2rem; margin-bottom: 14px; display: block; }
+</style>
+</head>
+<body>
+<h1>Projects</h1>
+<p class="subtitle">A collection of browser-based experiments</p>
+<div class="grid">
+  <a class="card" href="./SimShampoo/">
+    <span class="badge live">Live</span>
+    <span class="emoji">💆</span>
+    <h2>SimShampoo</h2>
+    <p>A hair salon simulation game. Shampoo customers, build foam, rinse, and upgrade your salon.</p>
+  </a>
+  <div class="card">
+    <span class="badge">Coming soon</span>
+    <span class="emoji">🃏</span>
+    <h2>Poker Quiz</h2>
+    <p>Test your poker knowledge with hand rankings, pot odds, and strategy questions.</p>
+  </div>
+</div>
+</body>
+</html>
