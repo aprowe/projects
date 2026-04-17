@@ -256,11 +256,24 @@
   // Build spline and provide value/derivative evaluators.
   function buildSpline(nodes, tension = 0) {
     const xs = nodes.map(n => n.t), ys = nodes.map(n => n.w);
-    const { m, h } = pchipTangents(xs, ys);
-    // Blend tangents toward 0. Keeps monotonicity (magnitudes only shrink)
-    // and produces an ease-in/ease-out at every marker when tension = 1.
-    const s = 1 - tension;
-    for (let i = 0; i < m.length; i++) m[i] *= s;
+    const { m, h, d } = pchipTangents(xs, ys);
+    // Blend tangents toward slope 1 (identity / real-time playback at each
+    // marker). tension=0 -> natural PCHIP; tension=1 -> slope 1 at every
+    // marker where feasible. Re-apply Fritsch-Carlson clamp afterward so
+    // monotonicity is preserved on steep segments.
+    for (let i = 0; i < m.length; i++) m[i] = (1 - tension) * m[i] + tension * 1;
+    for (let k = 0; k < d.length; k++) {
+      if (d[k] === 0) { m[k] = 0; m[k + 1] = 0; continue; }
+      if (m[k]   / d[k] < 0) m[k]   = 0;
+      if (m[k+1] / d[k] < 0) m[k+1] = 0;
+      const a = m[k] / d[k], b = m[k + 1] / d[k];
+      const s = a * a + b * b;
+      if (s > 9) {
+        const tau = 3 / Math.sqrt(s);
+        m[k]     = tau * a * d[k];
+        m[k + 1] = tau * b * d[k];
+      }
+    }
     function seg(x) {
       // find segment k such that xs[k] <= x <= xs[k+1]
       let k = 0;
