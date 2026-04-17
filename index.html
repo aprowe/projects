@@ -257,11 +257,18 @@
   function buildSpline(nodes, tension = 0) {
     const xs = nodes.map(n => n.t), ys = nodes.map(n => n.w);
     const { m, h, d } = pchipTangents(xs, ys);
-    // Blend tangents toward slope 1 (identity / real-time playback at each
-    // marker). tension=0 -> natural PCHIP; tension=1 -> slope 1 at every
-    // marker where feasible. Re-apply Fritsch-Carlson clamp afterward so
-    // monotonicity is preserved on steep segments.
-    for (let i = 0; i < m.length; i++) m[i] = (1 - tension) * m[i] + tension * 1;
+    // Target "natural" tangent: centered difference of adjacent secant slopes
+    // (Catmull-Rom). Matches the local trend of the markers, so if every
+    // segment has slope s then every marker tangent is s.
+    const n = xs.length;
+    const target = new Array(n);
+    for (let k = 1; k < n - 1; k++)
+      target[k] = (d[k - 1] * h[k] + d[k] * h[k - 1]) / (h[k - 1] + h[k]);
+    target[0]     = d[0];
+    target[n - 1] = d[n - 2];
+    // Blend PCHIP tangent toward the natural one, then re-apply
+    // Fritsch-Carlson clamp so monotonicity is preserved.
+    for (let i = 0; i < m.length; i++) m[i] = (1 - tension) * m[i] + tension * target[i];
     for (let k = 0; k < d.length; k++) {
       if (d[k] === 0) { m[k] = 0; m[k + 1] = 0; continue; }
       if (m[k]   / d[k] < 0) m[k]   = 0;
