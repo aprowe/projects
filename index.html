@@ -1,0 +1,523 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Video Warp Visualizer — C¹-continuous marker-based retiming</title>
+<style>
+  :root {
+    --bg: #0e1116;
+    --panel: #161b22;
+    --line: #2a313c;
+    --fg: #e6edf3;
+    --muted: #8b949e;
+    --accent: #58a6ff;
+    --accent2: #f78166;
+    --marker: #f0c674;
+    --grid: #1f252d;
+    --ok: #3fb950;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg);
+    font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+  header { padding: 14px 20px; border-bottom: 1px solid var(--line); }
+  h1 { margin: 0; font-size: 16px; font-weight: 600; }
+  header small { color: var(--muted); font-weight: 400; margin-left: 8px; }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 16px 20px 40px; }
+  .controls {
+    display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
+    margin: 12px 0; padding: 10px; background: var(--panel);
+    border: 1px solid var(--line); border-radius: 8px;
+  }
+  .controls button, .controls label {
+    background: #21262d; color: var(--fg); border: 1px solid var(--line);
+    padding: 6px 12px; border-radius: 6px; font-size: 13px; cursor: pointer;
+    user-select: none;
+  }
+  .controls button:hover { background: #2d333b; }
+  .controls label { display: inline-flex; gap: 6px; align-items: center; cursor: default;}
+  .controls input[type=checkbox] { accent-color: var(--accent); }
+  .controls .sep { flex: 1; }
+  .controls .hint { color: var(--muted); font-size: 12px; }
+  .chart {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 8px; padding: 10px; margin-bottom: 14px;
+  }
+  .chart .title { font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+  canvas { display: block; width: 100%; height: auto; border-radius: 4px;
+    touch-action: none; }
+  .legend { display: flex; gap: 16px; flex-wrap: wrap;
+    font-size: 12px; color: var(--muted); margin-top: 6px; }
+  .legend .swatch {
+    display: inline-block; width: 14px; height: 3px; vertical-align: middle;
+    margin-right: 4px; border-radius: 2px;
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block;
+    vertical-align: middle; margin-right: 4px; }
+  footer { color: var(--muted); font-size: 12px; margin-top: 12px; line-height: 1.5; }
+  code { background: #1b1f26; padding: 1px 5px; border-radius: 3px; font-size: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Video Warp Visualizer <small>marker-based retiming with C¹-continuous piecewise cubic</small></h1>
+</header>
+<div class="wrap">
+  <div class="controls">
+    <button id="btn-clear">Clear markers</button>
+    <button id="btn-reset">Reset example</button>
+    <label><input type="checkbox" id="show-linear" checked/> Show piecewise-linear</label>
+    <label><input type="checkbox" id="show-smooth" checked/> Show C¹ smooth (PCHIP)</label>
+    <div class="sep"></div>
+    <span class="hint">Click empty space to add a marker · drag to move · right-click (or shift-click) to delete</span>
+  </div>
+
+  <div class="chart">
+    <div class="title">Warp function &nbsp;—&nbsp; x: original time &nbsp;·&nbsp; y: output (warped) time</div>
+    <canvas id="warp" width="1060" height="440"></canvas>
+    <div class="legend">
+      <span><span class="swatch" style="background:#3a3f48"></span>identity (no warp)</span>
+      <span><span class="swatch" style="background:#8b949e"></span>piecewise-linear</span>
+      <span><span class="swatch" style="background:#58a6ff"></span>PCHIP (C¹, monotone)</span>
+      <span><span class="dot" style="background:#f0c674"></span>marker (drag me)</span>
+    </div>
+  </div>
+
+  <div class="chart">
+    <div class="title">Derivative &nbsp;—&nbsp; playback speed multiplier dy/dx</div>
+    <canvas id="deriv" width="1060" height="220"></canvas>
+    <div class="legend">
+      <span><span class="swatch" style="background:#3a3f48"></span>1× (no warp)</span>
+      <span><span class="swatch" style="background:#8b949e"></span>linear (step discontinuities)</span>
+      <span><span class="swatch" style="background:#f78166"></span>PCHIP derivative (continuous)</span>
+    </div>
+  </div>
+
+  <footer>
+    The C¹ curve is a <b>monotone cubic Hermite interpolant</b> (Fritsch–Carlson PCHIP).
+    For each segment we pick tangents so that (1) every marker is hit exactly,
+    (2) the curve never goes backwards (time stays monotonic so video never plays in reverse),
+    and (3) the derivative is continuous at every marker — so the playback-speed plot
+    below has no jumps, unlike the plain piecewise-linear solution.
+  </footer>
+</div>
+
+<script>
+(() => {
+  // ---------- Model ----------
+  // Markers: each is {t: originalTime, w: warpedTime} in [0,1].
+  // Implicit anchors at (0,0) and (1,1) so the warp always starts & ends at the endpoints.
+  let markers = [
+    { t: 0.25, w: 0.55 },
+    { t: 0.55, w: 0.70 },
+    { t: 0.80, w: 0.85 },
+  ];
+
+  // ---------- PCHIP (Fritsch–Carlson monotone cubic Hermite) ----------
+  // Given strictly increasing xs and ys (monotone non-decreasing), compute
+  // tangents m[k] so the cubic Hermite interpolant is monotone & C¹.
+  function pchipTangents(xs, ys) {
+    const n = xs.length;
+    const h = new Array(n - 1), d = new Array(n - 1);
+    for (let k = 0; k < n - 1; k++) {
+      h[k] = xs[k + 1] - xs[k];
+      d[k] = (ys[k + 1] - ys[k]) / h[k];
+    }
+    const m = new Array(n);
+    // Interior tangents: weighted harmonic mean, or 0 if slopes change sign.
+    for (let k = 1; k < n - 1; k++) {
+      if (d[k - 1] * d[k] <= 0) {
+        m[k] = 0;
+      } else {
+        const w1 = 2 * h[k] + h[k - 1];
+        const w2 = h[k] + 2 * h[k - 1];
+        m[k] = (w1 + w2) / (w1 / d[k - 1] + w2 / d[k]);
+      }
+    }
+    // Endpoint tangents: noncentered 3-point, clamped for monotonicity.
+    m[0] = endpoint(h[0], h[1] ?? h[0], d[0], d[1] ?? d[0]);
+    m[n - 1] = endpoint(h[n - 2], h[n - 3] ?? h[n - 2], d[n - 2], d[n - 3] ?? d[n - 2]);
+    // Enforce monotonicity (Fritsch–Carlson): if alpha^2 + beta^2 > 9, rescale.
+    for (let k = 0; k < n - 1; k++) {
+      if (d[k] === 0) { m[k] = 0; m[k + 1] = 0; continue; }
+      const a = m[k] / d[k], b = m[k + 1] / d[k];
+      const s = a * a + b * b;
+      if (s > 9) {
+        const tau = 3 / Math.sqrt(s);
+        m[k] = tau * a * d[k];
+        m[k + 1] = tau * b * d[k];
+      }
+    }
+    return { m, h, d };
+  }
+  function endpoint(h0, h1, d0, d1) {
+    // one-sided finite difference, clamp sign/magnitude per Fritsch–Carlson.
+    const m = ((2 * h0 + h1) * d0 - h0 * d1) / (h0 + h1);
+    if (m * d0 <= 0) return 0;
+    if (d0 * d1 < 0 && Math.abs(m) > 3 * Math.abs(d0)) return 3 * d0;
+    return m;
+  }
+
+  // Evaluate cubic Hermite value and derivative on segment k at t in [0,1].
+  function hermite(y0, y1, m0, m1, h, t) {
+    const t2 = t * t, t3 = t2 * t;
+    const h00 =  2*t3 - 3*t2 + 1;
+    const h10 =      t3 - 2*t2 + t;
+    const h01 = -2*t3 + 3*t2;
+    const h11 =      t3 -   t2;
+    return h00*y0 + h10*h*m0 + h01*y1 + h11*h*m1;
+  }
+  function hermiteDeriv(y0, y1, m0, m1, h, t) {
+    const t2 = t * t;
+    const d00 =  6*t2 - 6*t;
+    const d10 =  3*t2 - 4*t + 1;
+    const d01 = -6*t2 + 6*t;
+    const d11 =  3*t2 - 2*t;
+    return (d00*y0 + d10*h*m0 + d01*y1 + d11*h*m1) / h;
+  }
+
+  // Build the nodes (anchors + markers) sorted by t, clamped away from each other.
+  function buildNodes() {
+    const nodes = [{ t: 0, w: 0 }, ...markers, { t: 1, w: 1 }];
+    nodes.sort((a, b) => a.t - b.t);
+    // guard: nudge coincident xs so we never divide by zero
+    const EPS = 1e-4;
+    for (let i = 1; i < nodes.length; i++) {
+      if (nodes[i].t <= nodes[i - 1].t + EPS)
+        nodes[i].t = nodes[i - 1].t + EPS;
+    }
+    // enforce monotonic ws so the user can't create a reverse-time warp
+    for (let i = 1; i < nodes.length; i++) {
+      if (nodes[i].w < nodes[i - 1].w + EPS)
+        nodes[i].w = nodes[i - 1].w + EPS;
+    }
+    return nodes;
+  }
+
+  // ---------- Canvas helpers ----------
+  const warpCanvas  = document.getElementById('warp');
+  const derivCanvas = document.getElementById('deriv');
+
+  function fitCanvas(c) {
+    const dpr = window.devicePixelRatio || 1;
+    const rect = c.getBoundingClientRect();
+    c.width  = Math.round(rect.width  * dpr);
+    c.height = Math.round(rect.height * dpr);
+    const ctx = c.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return { ctx, W: rect.width, H: rect.height };
+  }
+
+  // Plot region inside a canvas (with padding)
+  function plotRect(W, H) {
+    const pad = { l: 48, r: 14, t: 12, b: 28 };
+    return { pad, x0: pad.l, y0: pad.t, w: W - pad.l - pad.r, h: H - pad.t - pad.b };
+  }
+
+  function drawGrid(ctx, rect, xLabel, yLabel, yMin, yMax) {
+    ctx.strokeStyle = '#1f252d';
+    ctx.fillStyle = '#8b949e';
+    ctx.lineWidth = 1;
+    ctx.font = '11px ui-sans-serif, system-ui, sans-serif';
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'right';
+    const steps = 10;
+    for (let i = 0; i <= steps; i++) {
+      const fx = i / steps;
+      const x = rect.x0 + fx * rect.w;
+      ctx.beginPath(); ctx.moveTo(x, rect.y0); ctx.lineTo(x, rect.y0 + rect.h); ctx.stroke();
+      ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+      ctx.fillText(fx.toFixed(1), x, rect.y0 + rect.h + 6);
+    }
+    const ys = 5;
+    for (let i = 0; i <= ys; i++) {
+      const fy = i / ys;
+      const y = rect.y0 + rect.h - fy * rect.h;
+      ctx.beginPath(); ctx.moveTo(rect.x0, y); ctx.lineTo(rect.x0 + rect.w, y); ctx.stroke();
+      ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+      const val = yMin + fy * (yMax - yMin);
+      ctx.fillText(val.toFixed(val === Math.floor(val) ? 0 : 1), rect.x0 - 6, y);
+    }
+    ctx.fillStyle = '#8b949e';
+    ctx.textAlign = 'center';
+    ctx.fillText(xLabel, rect.x0 + rect.w / 2, rect.y0 + rect.h + 20);
+    ctx.save();
+    ctx.translate(14, rect.y0 + rect.h / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.fillText(yLabel, 0, 0);
+    ctx.restore();
+  }
+
+  // ---------- Evaluation ----------
+  // Build spline and provide value/derivative evaluators.
+  function buildSpline(nodes) {
+    const xs = nodes.map(n => n.t), ys = nodes.map(n => n.w);
+    const { m, h } = pchipTangents(xs, ys);
+    function seg(x) {
+      // find segment k such that xs[k] <= x <= xs[k+1]
+      let k = 0;
+      for (; k < xs.length - 2 && x > xs[k + 1]; k++);
+      const t = (x - xs[k]) / h[k];
+      return { k, t };
+    }
+    return {
+      xs, ys, m, h,
+      value(x) { const {k,t} = seg(x); return hermite(ys[k], ys[k+1], m[k], m[k+1], h[k], t); },
+      deriv(x) { const {k,t} = seg(x); return hermiteDeriv(ys[k], ys[k+1], m[k], m[k+1], h[k], t); },
+    };
+  }
+
+  // Piecewise-linear value & derivative
+  function linearValue(nodes, x) {
+    for (let k = 0; k < nodes.length - 1; k++) {
+      if (x <= nodes[k + 1].t) {
+        const u = (x - nodes[k].t) / (nodes[k + 1].t - nodes[k].t);
+        return nodes[k].w + u * (nodes[k + 1].w - nodes[k].w);
+      }
+    }
+    return nodes[nodes.length - 1].w;
+  }
+  function linearDeriv(nodes, x) {
+    for (let k = 0; k < nodes.length - 1; k++) {
+      if (x < nodes[k + 1].t || k === nodes.length - 2)
+        return (nodes[k + 1].w - nodes[k].w) / (nodes[k + 1].t - nodes[k].t);
+    }
+    return 1;
+  }
+
+  // ---------- Render ----------
+  const showLinearBox = document.getElementById('show-linear');
+  const showSmoothBox = document.getElementById('show-smooth');
+
+  function render() {
+    const nodes = buildNodes();
+    const spline = buildSpline(nodes);
+
+    // Warp chart
+    {
+      const { ctx, W, H } = fitCanvas(warpCanvas);
+      ctx.clearRect(0, 0, W, H);
+      const rect = plotRect(W, H);
+      drawGrid(ctx, rect, 'original time (s)', 'output time (s)', 0, 1);
+
+      const toPx = (x, y) => [
+        rect.x0 + x * rect.w,
+        rect.y0 + rect.h - y * rect.h,
+      ];
+
+      // identity reference
+      ctx.strokeStyle = '#3a3f48';
+      ctx.setLineDash([4, 4]);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      let [ix, iy] = toPx(0, 0);
+      ctx.moveTo(ix, iy);
+      [ix, iy] = toPx(1, 1);
+      ctx.lineTo(ix, iy);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // piecewise-linear
+      if (showLinearBox.checked) {
+        ctx.strokeStyle = '#8b949e';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        nodes.forEach((n, i) => {
+          const [x, y] = toPx(n.t, n.w);
+          if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+      }
+
+      // PCHIP curve
+      if (showSmoothBox.checked) {
+        ctx.strokeStyle = '#58a6ff';
+        ctx.lineWidth = 2.25;
+        ctx.beginPath();
+        const N = 400;
+        for (let i = 0; i <= N; i++) {
+          const x = i / N;
+          const y = spline.value(x);
+          const [px, py] = toPx(x, y);
+          if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+        }
+        ctx.stroke();
+      }
+
+      // markers
+      for (const n of nodes) {
+        const isAnchor = (n.t === 0 && n.w === 0) || (n.t === 1 && n.w === 1);
+        const [x, y] = toPx(n.t, n.w);
+        ctx.beginPath();
+        ctx.arc(x, y, isAnchor ? 3.5 : 6, 0, Math.PI * 2);
+        ctx.fillStyle = isAnchor ? '#8b949e' : '#f0c674';
+        ctx.fill();
+        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = '#0e1116';
+        ctx.stroke();
+      }
+    }
+
+    // Derivative chart
+    {
+      const { ctx, W, H } = fitCanvas(derivCanvas);
+      ctx.clearRect(0, 0, W, H);
+      const rect = plotRect(W, H);
+
+      // Determine y-scale: include both linear & smooth derivatives
+      let dMin = 0, dMax = 1;
+      for (let k = 0; k < nodes.length - 1; k++) {
+        const s = (nodes[k+1].w - nodes[k].w) / (nodes[k+1].t - nodes[k].t);
+        if (s > dMax) dMax = s;
+      }
+      const N = 400;
+      for (let i = 0; i <= N; i++) {
+        const x = i / N;
+        const dy = spline.deriv(x);
+        if (dy > dMax) dMax = dy;
+        if (dy < dMin) dMin = dy;
+      }
+      // pad & snap to something reasonable
+      dMax = Math.max(1.2, Math.ceil(dMax * 10) / 10);
+      dMin = Math.min(0, Math.floor(dMin * 10) / 10);
+
+      drawGrid(ctx, rect, 'original time (s)', 'dy/dx (speed ×)', dMin, dMax);
+
+      const toPx = (x, d) => [
+        rect.x0 + x * rect.w,
+        rect.y0 + rect.h - ((d - dMin) / (dMax - dMin)) * rect.h,
+      ];
+
+      // 1x reference
+      ctx.strokeStyle = '#3a3f48';
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      let [x1, y1] = toPx(0, 1);
+      ctx.moveTo(x1, y1);
+      [x1, y1] = toPx(1, 1);
+      ctx.lineTo(x1, y1);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // piecewise-linear derivative (step function)
+      if (showLinearBox.checked) {
+        ctx.strokeStyle = '#8b949e';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        for (let k = 0; k < nodes.length - 1; k++) {
+          const s = (nodes[k+1].w - nodes[k].w) / (nodes[k+1].t - nodes[k].t);
+          const [ax, ay] = toPx(nodes[k].t, s);
+          const [bx, by] = toPx(nodes[k+1].t, s);
+          if (k === 0) ctx.moveTo(ax, ay); else ctx.lineTo(ax, ay);
+          ctx.lineTo(bx, by);
+        }
+        ctx.stroke();
+      }
+
+      // PCHIP derivative (continuous)
+      if (showSmoothBox.checked) {
+        ctx.strokeStyle = '#f78166';
+        ctx.lineWidth = 2.25;
+        ctx.beginPath();
+        for (let i = 0; i <= N; i++) {
+          const x = i / N;
+          const dy = spline.deriv(x);
+          const [px, py] = toPx(x, dy);
+          if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+        }
+        ctx.stroke();
+      }
+
+      // markers (vertical guide lines)
+      ctx.strokeStyle = 'rgba(240,198,116,0.4)';
+      ctx.lineWidth = 1;
+      for (const n of nodes) {
+        if (n.t === 0 || n.t === 1) continue;
+        const [mx] = toPx(n.t, 1);
+        ctx.beginPath();
+        ctx.moveTo(mx, rect.y0);
+        ctx.lineTo(mx, rect.y0 + rect.h);
+        ctx.stroke();
+      }
+    }
+  }
+
+  // ---------- Interaction ----------
+  function canvasCoords(e, canvas) {
+    const r = canvas.getBoundingClientRect();
+    const x = (e.clientX - r.left);
+    const y = (e.clientY - r.top);
+    const rect = plotRect(r.width, r.height);
+    const tx = (x - rect.x0) / rect.w;
+    const ty = 1 - (y - rect.y0) / rect.h;
+    return { tx, ty, inside: tx >= 0 && tx <= 1 && ty >= 0 && ty <= 1 };
+  }
+
+  let drag = null; // {index}
+  const HIT = 10;
+
+  warpCanvas.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    warpCanvas.setPointerCapture(e.pointerId);
+    const { tx, ty, inside } = canvasCoords(e, warpCanvas);
+    if (!inside) return;
+    // Hit test existing markers
+    const r = warpCanvas.getBoundingClientRect();
+    const rect = plotRect(r.width, r.height);
+    let hitIdx = -1;
+    for (let i = 0; i < markers.length; i++) {
+      const px = rect.x0 + markers[i].t * rect.w;
+      const py = rect.y0 + rect.h - markers[i].w * rect.h;
+      const mx = rect.x0 + tx * rect.w;
+      const my = rect.y0 + rect.h - ty * rect.h;
+      if (Math.hypot(px - mx, py - my) < HIT) { hitIdx = i; break; }
+    }
+    if (e.button === 2 || e.shiftKey) {
+      if (hitIdx >= 0) { markers.splice(hitIdx, 1); render(); }
+      return;
+    }
+    if (hitIdx >= 0) {
+      drag = { index: hitIdx };
+    } else {
+      // add new marker
+      markers.push({ t: tx, w: ty });
+      markers.sort((a, b) => a.t - b.t);
+      drag = { index: markers.findIndex(m => m.t === tx && m.w === ty) };
+      render();
+    }
+  });
+
+  warpCanvas.addEventListener('pointermove', (e) => {
+    if (!drag) return;
+    const { tx, ty } = canvasCoords(e, warpCanvas);
+    const i = drag.index;
+    markers[i].t = Math.max(0.001, Math.min(0.999, tx));
+    markers[i].w = Math.max(0.001, Math.min(0.999, ty));
+    // re-sort but keep dragging the same marker
+    const dragged = markers[i];
+    markers.sort((a, b) => a.t - b.t);
+    drag.index = markers.indexOf(dragged);
+    render();
+  });
+
+  warpCanvas.addEventListener('pointerup',   () => drag = null);
+  warpCanvas.addEventListener('pointercancel', () => drag = null);
+  warpCanvas.addEventListener('contextmenu', (e) => e.preventDefault());
+
+  document.getElementById('btn-clear').onclick = () => { markers = []; render(); };
+  document.getElementById('btn-reset').onclick = () => {
+    markers = [
+      { t: 0.25, w: 0.55 },
+      { t: 0.55, w: 0.70 },
+      { t: 0.80, w: 0.85 },
+    ];
+    render();
+  };
+  showLinearBox.onchange = render;
+  showSmoothBox.onchange = render;
+  window.addEventListener('resize', render);
+
+  render();
+})();
+</script>
+</body>
+</html>
