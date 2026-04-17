@@ -67,6 +67,11 @@
     <button id="btn-reset">Reset example</button>
     <label><input type="checkbox" id="show-linear" checked/> Show piecewise-linear</label>
     <label><input type="checkbox" id="show-smooth" checked/> Show C¹ smooth (PCHIP)</label>
+    <label style="gap:8px;">
+      Tension
+      <input type="range" id="tension" min="0" max="1" step="0.01" value="0" style="width:140px;">
+      <span id="tension-val" style="color:var(--muted);min-width:2.5em;display:inline-block;">0.00</span>
+    </label>
     <div class="sep"></div>
     <span class="hint">Click empty space to add a marker · drag to move · right-click (or shift-click) to delete</span>
   </div>
@@ -249,9 +254,13 @@
 
   // ---------- Evaluation ----------
   // Build spline and provide value/derivative evaluators.
-  function buildSpline(nodes) {
+  function buildSpline(nodes, tension = 0) {
     const xs = nodes.map(n => n.t), ys = nodes.map(n => n.w);
     const { m, h } = pchipTangents(xs, ys);
+    // Blend tangents toward 0. Keeps monotonicity (magnitudes only shrink)
+    // and produces an ease-in/ease-out at every marker when tension = 1.
+    const s = 1 - tension;
+    for (let i = 0; i < m.length; i++) m[i] *= s;
     function seg(x) {
       // find segment k such that xs[k] <= x <= xs[k+1]
       let k = 0;
@@ -287,10 +296,14 @@
   // ---------- Render ----------
   const showLinearBox = document.getElementById('show-linear');
   const showSmoothBox = document.getElementById('show-smooth');
+  const tensionSlider = document.getElementById('tension');
+  const tensionVal    = document.getElementById('tension-val');
 
   function render() {
     const nodes = buildNodes();
-    const spline = buildSpline(nodes);
+    const tension = parseFloat(tensionSlider.value);
+    tensionVal.textContent = tension.toFixed(2);
+    const spline = buildSpline(nodes, tension);
 
     // Warp chart
     {
@@ -514,6 +527,7 @@
   };
   showLinearBox.onchange = render;
   showSmoothBox.onchange = render;
+  tensionSlider.oninput = render;
   window.addEventListener('resize', render);
 
   render();
