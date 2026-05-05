@@ -56,11 +56,7 @@ pub fn resolve_attack(
     }
 
     // Critical destructions: heart, head, or neck — instant kill.
-    let critical = matches!(
-        part_kind,
-        BodyPartKind::Heart | BodyPartKind::Head | BodyPartKind::Neck
-    );
-    if destroyed && critical {
+    if destroyed && part_kind.is_critical() {
         if let Some(mut h) = world.get_mut::<Health>(target) {
             h.current = 0;
         }

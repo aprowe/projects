@@ -11,6 +11,7 @@ pub mod actions;
 pub mod anatomy;
 pub mod combat;
 pub mod components;
+pub mod hazards;
 pub mod items;
 pub mod log;
 pub mod needs;
@@ -25,10 +26,13 @@ pub mod world;
 
 pub use actions::{fill_region_logged, note, set_voxel_logged, spawn_creature};
 pub use anatomy::{
-    anatomy_alive, function_capacity, part_functions, spawn_humanoid_body, BodyPart,
-    BodyPartKind, Function, HitWeight, PartHealth, PartOf, PartStatus,
+    anatomy_alive, apply_body_plan, default_functions, dragon_body_plan, function_capacity,
+    humanoid_body_plan, quadruped_body_plan, spawn_humanoid_body, BodyPart, BodyPartKind,
+    BodyPartSpec, BodyPlan, Function, HitWeight, PartHealth, PartLabel, PartOf, PartStatus,
+    ProvidesFunctions,
 };
 pub use combat::{resolve_attack, AttackResult};
+pub use hazards::{check_hazards, Hazard};
 pub use components::{ExtraData, Faction, Health, Kind, Position};
 pub use items::{
     drop_item, equip_item, give_item, held_weapons_summary, item_world_position, unequip_item,

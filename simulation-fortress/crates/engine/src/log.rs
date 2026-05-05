@@ -86,6 +86,11 @@ pub enum Event {
         entity: Entity,
         reason: &'static str,
     },
+    Slipped {
+        entity: Entity,
+        hazard: String,
+        prone_ticks: u32,
+    },
 }
 
 #[derive(Resource, Default)]
@@ -236,6 +241,16 @@ pub fn narrate(event: &Event, world: &World) -> String {
         Event::TaskFailed { entity, reason } => format!(
             "{}'s task fails: {reason}.",
             label(*entity, world),
+        ),
+        Event::Slipped {
+            entity,
+            hazard,
+            prone_ticks,
+        } => format!(
+            "{} slips on the {} and crashes to the floor (prone for {} ticks).",
+            label(*entity, world),
+            hazard,
+            prone_ticks,
         ),
         Event::BodyPartDestroyed {
             entity,

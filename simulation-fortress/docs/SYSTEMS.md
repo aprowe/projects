@@ -128,26 +128,35 @@ Adding new aspects of a creature is just a new `Component`:
 
 ## 5. Anatomy & wounds — partial
 
-Body parts are ECS entities, not nested data. Each humanoid creature
-gets ~22 body-part entities tagged with `BodyPart`, a `BodyPartKind`
-(Head, LeftEye, RightEar, Torso, Heart, LeftHand, RightLeg, …), a
-`PartOf(Entity)` backlink to the creature, a `PartHealth { current,
-max, status }`, and a `HitWeight(u32)` used for weighted random
-combat targeting.
+Body parts are ECS entities, not nested data. Bodies are described
+as data via `BodyPlan { parts: Vec<BodyPartSpec> }` and applied with
+`apply_body_plan(world, creature, plan)`. Each spawned part carries:
+
+- `BodyPart` marker.
+- `BodyPartKind` — broad enum (Head, LeftEye, Torso, LeftWing,
+  Tail, Horn, Claw, …, plus `Other` as a catch-all).
+- `PartOf(Entity)` backlink.
+- `PartHealth { current, max, status }`.
+- `HitWeight(u32)` for weighted random combat targeting.
+- `ProvidesFunctions(Vec<Function>)` — what abilities the part
+  contributes when intact.
+- Optional `PartLabel(String)` for display ("front-left paw",
+  "venomous fang", "scaly hide").
 
 `PartStatus` covers Intact, Bruised, Cut, Broken, Crushed, Severed,
-each with a `capacity()` factor. Functions are looked up by
-`part_functions(kind)` and aggregated into per-creature capacities
-via `function_capacity(world, creature, function)`. Recognised
-functions today: Vision, Hearing, Smell, Speech, Grasp, Mobility,
-Vitality, Breathing. Two intact ears = hearing 2.0; one crushed,
-one intact = hearing 1.0; both gone = hearing 0.0.
+each with a `capacity()` factor. `function_capacity(world,
+creature, function)` aggregates intact contributions across the
+creature's parts. Recognised functions today: Vision, Hearing,
+Smell, Speech, Grasp, Mobility, Vitality, Breathing, Flight.
 
-`spawn_humanoid_body(world, creature)` creates the standard layout.
-Internal organs (Heart, Lungs, Stomach, Tongue) have hit weight 0 —
-they aren't directly targeted by external blows; reaching them
-requires either targeted strikes (future) or cascading from severe
-torso/head damage (future).
+Preset body plans:
+
+- `humanoid_body_plan()` — 22 parts, the canonical layout.
+- `quadruped_body_plan()` — head + torso + 4 legs/paws + tail; no
+  hands. Reuses `LeftArm`/`RightArm` enum variants for the rear
+  pair, with `PartLabel` set to "rear-left leg" etc.
+- `dragon_body_plan()` — heavy head with horns, wings (granting
+  Flight), foreclaws, large tail. ~24 parts total.
 
 Code: `crates/engine/src/anatomy.rs`
 
@@ -156,11 +165,12 @@ Open questions:
 - Layered materials (skin / fat / muscle / bone) — extra components
   per part, or sub-entities?
 - Bleeding as a tick-driven status effect that depletes aggregate
-  Health?
-- Cascading damage: a destroyed Torso should imperil Heart and Lungs.
+  Health.
+- Cascading damage: a destroyed Torso should imperil Heart and
+  Lungs.
 - Prosthetics, regrowth, scarring — scenario-toggleable?
-- Non-humanoid layouts (quadrupeds, multi-headed beasts) — currently
-  only `spawn_humanoid_body` exists.
+- Body-plan registry as a `Resource` so plans can be addressed by
+  name from configs / scripts (Scribblenauts-style spawning).
 
 ## 6. Personality — planned
 
@@ -502,6 +512,33 @@ Open questions:
 - Generator API: `fn generate(world: &mut World, rng: &mut Rng,
   params: ...)`.
 - Composability: can a generator nest others?
+
+## 16b. Hazards — partial
+
+Environmental hazards are entities with `Position` + `Hazard`. The
+`check_hazards` system runs after `execute_tasks`, reads the tick's
+`EntityMoved` events, and applies a hazard whenever a creature
+steps onto its tile.
+
+Today's only `Hazard` variant is `Slippery { slip_chance,
+prone_ticks, label }`: rolls against the seeded RNG, and on a hit
+shoves a `Task::Wait(prone_ticks)` to the front of the victim's
+queue and emits an `Event::Slipped`. The renderer was extended so
+non-creature entities (hazards, furniture) with `Position + Kind`
+appear on the ASCII map *only* if the scenario registers a glyph
+for that kind — voxels show through otherwise.
+
+Code: `crates/engine/src/hazards.rs`
+
+This is the engine's first piece of the broader **runtime event
+injection** story: external code (CLI, REPL, future LLM front-end)
+gets `&mut World` between ticks and can spawn hazards, push events
+into the log, mutate components — and existing systems pick it up
+on the next tick without any special "injection" plumbing.
+
+Future hazard kinds: `Burning`, `Poisonous`, `Electric`,
+`Suffocating`. Each one adds a variant to `Hazard` and a match arm
+to `apply_hazard`.
 
 ## 17. Events & logging — partial
 

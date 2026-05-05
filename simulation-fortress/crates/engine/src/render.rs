@@ -129,26 +129,36 @@ impl Renderer for AsciiRenderer {
         let mut overlay: HashMap<(i32, i32), char> = HashMap::new();
         let mut total = 0usize;
         let mut alive = 0usize;
-        let mut q = world.query::<(&Kind, &Position, &Health, Option<&Faction>)>();
+        let mut q = world.query::<(&Kind, &Position, Option<&Health>, Option<&Faction>)>();
         for (kind, pos, health, faction) in q.iter(world) {
-            total += 1;
-            if !health.is_alive() {
-                continue;
+            // Things with Health are creatures we count for the alive
+            // tally; things without (furniture, hazards) render only
+            // if the scenario has registered a glyph for their kind.
+            if let Some(h) = health {
+                total += 1;
+                if !h.is_alive() {
+                    continue;
+                }
+                alive += 1;
             }
-            alive += 1;
             if pos.0.z != self.z {
                 continue;
             }
-            let glyph = self
+            let resolved = self
                 .entity_kind_glyphs
                 .get(&kind.0)
                 .copied()
                 .or_else(|| {
                     faction
                         .and_then(|f| self.faction_glyphs.get(&f.0).copied())
-                })
-                .unwrap_or(self.default_entity_glyph);
-            overlay.insert((pos.0.x, pos.0.y), glyph);
+                });
+            let glyph = match (health.is_some(), resolved) {
+                (true, Some(g)) => g,
+                (true, None) => self.default_entity_glyph,
+                (false, Some(g)) => g,
+                (false, None) => continue,
+            };
+            overlay.entry((pos.0.x, pos.0.y)).or_insert(glyph);
         }
 
         let voxel_world = world.resource::<VoxelWorld>();
