@@ -6,10 +6,10 @@
 use fortress_engine::actions::{fill_region_logged, note, spawn_creature};
 use fortress_engine::prelude::*;
 use fortress_engine::{
-    equip_item, find_path, resolve_attack, spawn_humanoid_body, BodySlot, Clock,
-    ElectricalConductivity, Event, EventLog, Health, Item, ItemName, Kind, Mass, Material,
-    Position, Pos, Scenario, Temperature, Texture, ThermalConductivity, Voxel, VoxelWorld,
-    Wearable,
+    equip_item, execute_tasks, retaliation_system, spawn_humanoid_body, BodySlot, Clock,
+    ElectricalConductivity, Event, EventLog, Goal, Health, Item, ItemName, Kind, Mass, Material,
+    Position, Pos, RetaliateOnAttack, Scenario, Task, TaskQueue, Temperature, Texture,
+    ThermalConductivity, Voxel, VoxelWorld, Wearable,
 };
 
 const FAMILY: &str = "family";
@@ -97,7 +97,12 @@ impl Scenario for HomeInvasion {
                 60,
                 Some(FAMILY),
             );
-            world.entity_mut(entity).insert(Family);
+            world
+                .entity_mut(entity)
+                .insert(Family)
+                .insert(TaskQueue::default())
+                .insert(Goal::default())
+                .insert(RetaliateOnAttack);
             spawn_humanoid_body(world, entity);
 
             let shirt = spawn_wool_shirt(world);
@@ -108,7 +113,11 @@ impl Scenario for HomeInvasion {
         note(world, "Three residents settle into the cabin, going about their evening.");
 
         let intruder = spawn_creature(world, "intruder", Pos::new(4, -3, 0), 120, Some(INTRUDER));
-        world.entity_mut(intruder).insert(Intruder);
+        world
+            .entity_mut(intruder)
+            .insert(Intruder)
+            .insert(TaskQueue::default())
+            .insert(Goal::default());
         spawn_humanoid_body(world, intruder);
 
         let crowbar = spawn_crowbar(world);
@@ -121,7 +130,15 @@ impl Scenario for HomeInvasion {
 
     fn build_schedule(&mut self) -> Schedule {
         let mut schedule = Schedule::default();
-        schedule.add_systems(intruder_behavior);
+        schedule.add_systems(
+            (
+                intruder_planner,
+                doorway_announcer,
+                execute_tasks,
+                retaliation_system,
+            )
+                .chain(),
+        );
         schedule
     }
 
@@ -144,95 +161,87 @@ impl Scenario for HomeInvasion {
     }
 }
 
-/// Per-tick AI for the intruder: re-plan to the nearest living family
-/// member, attack if adjacent, otherwise step along the path. Runs as
-/// an exclusive system so it can call `resolve_attack`.
-fn intruder_behavior(world: &mut World) {
+/// Picks a target for the intruder and queues `Task::Attack(target)`
+/// when the goal changes. Replans when the current target dies.
+fn intruder_planner(world: &mut World) {
     let intruder = match find_intruder(world) {
         Some(e) => e,
         None => return,
     };
-    if world
+    let alive = world
         .get::<Health>(intruder)
-        .map(|h| !h.is_alive())
-        .unwrap_or(true)
-    {
+        .map(|h| h.is_alive())
+        .unwrap_or(false);
+    if !alive {
         return;
     }
 
     let intruder_pos = world.get::<Position>(intruder).map(|p| p.0).unwrap();
-    let target = nearest_living_family(world, intruder_pos);
-    let Some((target_entity, target_kind, target_pos)) = target else {
-        push_note(
-            world,
-            "The intruder pauses, breath ragged; no one alive remains to threaten.",
-        );
-        return;
+    let target = nearest_living_family(world, intruder_pos).map(|(e, _, _)| e);
+    let new_goal = match target {
+        Some(t) => Goal::Kill(t),
+        None => Goal::Idle,
     };
 
-    let path = {
-        let vw = world.resource::<VoxelWorld>();
-        find_path(vw, intruder_pos, target_pos, 4096)
-    };
-    let Some(path) = path else {
-        push_note(
-            world,
-            format!(
-                "The intruder peers about but can't find a path to {target_kind}#{}.",
-                target_entity.index()
-            ),
-        );
-        return;
-    };
-    if path.len() < 2 {
+    let current_goal = world.get::<Goal>(intruder).cloned().unwrap_or_default();
+    let queue_empty = world
+        .get::<TaskQueue>(intruder)
+        .map(|q| q.is_empty())
+        .unwrap_or(true);
+
+    let needs_replan = current_goal != new_goal || queue_empty;
+    if !needs_replan {
         return;
     }
 
-    let next = path[1];
-    if next == target_pos {
+    if let Some(mut q) = world.get_mut::<TaskQueue>(intruder) {
+        q.clear();
+    }
+    if let Some(mut g) = world.get_mut::<Goal>(intruder) {
+        *g = new_goal.clone();
+    }
+
+    match new_goal {
+        Goal::Kill(target_entity) => {
+            if let Some(mut q) = world.get_mut::<TaskQueue>(intruder) {
+                q.push(Task::Attack(target_entity));
+            }
+        }
+        Goal::Idle => {
+            push_note(
+                world,
+                "The intruder pauses, breath ragged; no one alive remains to threaten.",
+            );
+        }
+        _ => {}
+    }
+}
+
+/// Watches `EntityMoved` events for the intruder crossing into the
+/// cabin and emits a one-line note. Pure narration; no game state
+/// changes.
+fn doorway_announcer(world: &mut World) {
+    let tick = world.resource::<Clock>().tick;
+    let intruder = match find_intruder(world) {
+        Some(e) => e,
+        None => return,
+    };
+    let crossings: Vec<()> = world
+        .resource::<EventLog>()
+        .events_at(tick)
+        .filter_map(|e| match e {
+            Event::EntityMoved {
+                entity,
+                from,
+                to,
+            } if *entity == intruder && !inside_house(*from) && inside_house(*to) => Some(()),
+            _ => None,
+        })
+        .collect();
+    if !crossings.is_empty() {
         push_note(
             world,
-            format!(
-                "The intruder closes the gap on {target_kind}#{} and swings.",
-                target_entity.index()
-            ),
-        );
-        resolve_attack(world, intruder, target_entity);
-        // The target swings back if still alive.
-        let target_alive = world
-            .get::<Health>(target_entity)
-            .map(|h| h.is_alive())
-            .unwrap_or(false);
-        if target_alive {
-            push_note(
-                world,
-                format!(
-                    "{target_kind}#{} flails back, fists swinging.",
-                    target_entity.index()
-                ),
-            );
-            resolve_attack(world, target_entity, intruder);
-        }
-    } else {
-        let was_outside = !inside_house(intruder_pos);
-        let now_inside = inside_house(next);
-        if was_outside && now_inside {
-            push_note(
-                world,
-                "The intruder ducks through the doorway and into the cabin.",
-            );
-        }
-        if let Some(mut p) = world.get_mut::<Position>(intruder) {
-            p.0 = next;
-        }
-        let tick = world.resource::<Clock>().tick;
-        world.resource_mut::<EventLog>().push(
-            tick,
-            Event::EntityMoved {
-                entity: intruder,
-                from: intruder_pos,
-                to: next,
-            },
+            "The intruder ducks through the doorway and into the cabin.",
         );
     }
 }

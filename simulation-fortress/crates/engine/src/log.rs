@@ -78,6 +78,14 @@ pub enum Event {
         status: PartStatus,
         weapon: String,
     },
+    EntityUsed {
+        user: Entity,
+        target: Entity,
+    },
+    TaskFailed {
+        entity: Entity,
+        reason: &'static str,
+    },
 }
 
 #[derive(Resource, Default)]
@@ -219,6 +227,15 @@ pub fn narrate(event: &Event, world: &World) -> String {
             status.label(),
             weapon,
             damage,
+        ),
+        Event::EntityUsed { user, target } => format!(
+            "{} interacts with {}.",
+            label(*user, world),
+            label(*target, world),
+        ),
+        Event::TaskFailed { entity, reason } => format!(
+            "{}'s task fails: {reason}.",
+            label(*entity, world),
         ),
         Event::BodyPartDestroyed {
             entity,

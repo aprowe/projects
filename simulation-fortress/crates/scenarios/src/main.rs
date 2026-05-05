@@ -7,6 +7,7 @@ use fortress_engine::{
     Position, Pos, RunOptions, Scenario, Simulation, VoxelWorld, Wearing,
 };
 
+mod farming;
 mod home_invasion;
 
 fn main() {
@@ -66,9 +67,21 @@ fn main() {
             print_summary(&scenario, &mut sim, t);
             t
         }
+        "farming" => {
+            let mut scenario = farming::Farming;
+            let log = LogRenderer::default();
+            let ascii = AsciiRenderer::new(Pos::new(-1, -1, 0), Pos::new(7, 7, 0))
+                .at_z(0)
+                .frame_every(2)
+                .faction("farm", 'F');
+            let mut renderer = CompositeRenderer(log, ascii);
+            let t = sim.run_with(&mut scenario, options, &mut renderer);
+            print_summary(&scenario, &mut sim, t);
+            t
+        }
         other => {
             eprintln!("unknown scenario: {other}");
-            eprintln!("available: home_invasion");
+            eprintln!("available: home_invasion, farming");
             std::process::exit(1);
         }
     };

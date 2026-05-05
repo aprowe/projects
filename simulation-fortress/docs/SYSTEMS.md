@@ -269,67 +269,74 @@ Open questions:
 - Skill trees / prerequisites, or flat list?
 - Cross-scenario skill registry, or per-scenario.
 
-## 10b. Task system — planned
+## 10b. Task system — partial
 
-Generic three-layer model for what an actor wants and is doing:
+Three-layer model for what an actor wants and is doing:
 
-- **Behavior** — the long-running role identity (Farmer, Soldier,
-  Zombie, Server). A marker component per role; the actor's
-  "profession" or "type".
-- **Goal** — current high-level intent, chosen by the behavior
-  given needs and perceptions ("eat", "kill nearest target",
-  "fulfill order #42"). One component on the actor; replaceable
-  when a higher-priority goal pre-empts.
-- **TaskQueue** — ordered low-level actions to satisfy the goal.
-  An executor system advances the head each tick; on completion
-  pops; on exhaustion the goal resolves (or fails).
+- **Behavior** — the long-running role identity. Implemented as a
+  scenario-defined marker component (`Intruder`, `Family`, `Farmer`,
+  `Customer`). Drives planner systems.
+- **Goal** — current high-level intent. The engine ships a small
+  enum (`Goal::Idle / GoTo / Kill / Tend`) that scenarios can use
+  directly or supplement with their own goal-like components.
+- **TaskQueue** — `VecDeque<Task>` component on actors. The engine
+  executor (`execute_tasks`) advances the head task each tick.
 
-The reusable `Task` set covers ~80% of every scenario's needs:
+Built-in `Task` variants the executor knows how to run:
 
-- `MoveTo(Pos)` — uses the existing pathfinder.
-- `Acquire(ItemKind)` — find-then-pickup convenience.
-- `PickUp(Entity)`, `Drop(Entity)`, `Equip(Entity)`.
-- `UseEntity(Entity)` — generic interaction (sit on chair,
-  operate stove, plow tile).
-- `Attack(Entity)`.
-- `Talk(Entity, Topic)`.
-- `Wait(Ticks)`.
-- `Build(Pos, Voxel)`.
-- `Eat(Entity)`, `Drink(Entity)`, `Sleep(Pos)`.
+- `MoveTo(Pos)` — uses the pathfinder; completes on arrival,
+  fails if no path.
+- `Attack(Entity)` — auto-pursues by stepping toward the target
+  when not adjacent; calls `resolve_attack` when adjacent;
+  completes on target death.
+- `Wait(u32)` — decrements each tick.
+- `UseEntity(Entity)` — emits `Event::EntityUsed { user, target }`
+  and completes; scenarios react to the event to apply effects
+  (advance crop growth, trigger lever, etc).
+- `PickUp(Entity)` / `Equip(Entity)` — call the corresponding item
+  helpers and complete the same tick.
 
-Scenarios extend with custom variants when generic `UseEntity` isn't
-expressive enough (`Plow(tile)`, `ServeOrder(table, dish)`,
-`Infect(target)`).
+Failed tasks pop and emit `Event::TaskFailed { entity, reason }`,
+narrated by the prose log renderer.
 
-Likely shape:
+Two opt-in helpers ride along:
 
-```rust
-#[derive(Component)]
-pub enum Goal { Idle, Kill(Entity), Tend(Entity), Patrol(Pos), ... }
+- `RetaliateOnAttack` — marker component. When the wearer is hit,
+  `retaliation_system` queues `Task::Attack(attacker)` at the front
+  of its queue (one-tick lag — retaliation lands the next tick).
+- `retaliation_system` — engine system you register in the schedule
+  alongside `execute_tasks`.
 
-#[derive(Component, Default)]
-pub struct TaskQueue(pub VecDeque<Task>);
+Code: `crates/engine/src/tasks.rs`
 
-pub enum Task { MoveTo(Pos), UseEntity(Entity), Attack(Entity), ... }
-```
+**Demonstrated in two scenarios:**
 
-Plus events `TaskStarted` / `TaskCompleted` / `TaskFailed` flowing
-into the log so narration covers per-task actions for free.
+- *Home invasion* — `intruder_planner` sets `Goal::Kill(target)`
+  and queues `Task::Attack(target)`. The executor handles
+  pathfinding and combat. Family members carry `RetaliateOnAttack`,
+  so the retaliation system queues counter-attacks driven by the
+  same task machinery.
+- *Farming* — `farmer_planner` sets `Goal::Tend(crop)` and queues
+  `[MoveTo(crop_pos), UseEntity(crop)]`. A scenario-local
+  `advance_used_crops` system listens for `EntityUsed` events on
+  crop entities and ticks each crop through five growth stages
+  (seed → sprout → growing → ripe → harvested). Two farmers
+  cooperatively harvest a 4x4 field in ~100 ticks.
 
-Open design choices:
+Still open:
 
-- **Plan generation**: GOAP-style planner (preconditions + effects)
-  vs. behavior-tree-style scripted plans. Start with scripted
-  per-behavior planners; promote to GOAP only if a scenario
+- **Plan generation**: today scripted per-behavior; GOAP-style
+  planning (preconditions + effects) waits until a scenario
   demands it.
-- **Failure handling**: default to clearing the queue and
-  re-planning from the current goal; let scenarios override.
-- **Interruption priorities**: combat goals always preempt;
-  beyond that, scenarios decide.
-- **Action duration**: most tasks are instantaneous-on-arrival
-  (move and attack), but some (sleep, plow, cook) span many ticks
-  — the `Task` enum should carry per-variant progress where
-  needed.
+- **Interruption priorities**: scenarios call `clear()` themselves
+  when a higher-priority goal preempts. A formal priority system
+  would help once we have multi-goal behaviors.
+- **More built-in variants**: `Drop`, `Talk`, `Build(Pos, Voxel)`,
+  `Eat`, `Sleep`, `Acquire(ItemKind)` (find-then-pickup). Add as
+  scenarios need them.
+- **Long-running task progress**: some tasks (cook a meal,
+  construct a wall) want explicit progress tracking instead of
+  ad-hoc `Wait`.
 
 ## 11. Needs, drives & moods — planned
 
