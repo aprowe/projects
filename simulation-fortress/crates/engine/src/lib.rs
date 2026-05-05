@@ -11,6 +11,7 @@ pub mod actions;
 pub mod anatomy;
 pub mod combat;
 pub mod components;
+pub mod dialog;
 pub mod dice;
 pub mod door;
 pub mod inject;
@@ -38,6 +39,10 @@ pub use anatomy::{
     ProvidesFunctions,
 };
 pub use combat::{armor_class, resolve_attack, AttackResult};
+pub use dialog::{
+    dialog_system, observation_system, Alarmed, Clearance, Conversation, DialogLine, Disguise,
+    Identity, Knowledge, Observer, Suspicion,
+};
 pub use door::{door_at, door_voxel_sync, Door, DoorState};
 pub use inject::{apply_action, apply_json, Action};
 pub use library::{

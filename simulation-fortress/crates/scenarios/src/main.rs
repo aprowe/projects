@@ -10,6 +10,7 @@ use fortress_engine::{
 };
 use replay::ReplayRenderer;
 
+mod airport;
 mod family_home;
 mod farming;
 mod home_invasion;
@@ -138,9 +139,26 @@ fn main() {
                 replay_html_path.clone(), "mansion home invasion",
             )
         }
+        "airport" => {
+            let mut scenario = airport::AirportInfiltration;
+            let ascii = AsciiRenderer::new(Pos::new(-1, -1, 0), Pos::new(25, 13, 0))
+                .at_z(0)
+                .frame_every(1)
+                .faction("spy", 'S')
+                .faction("security", 'G')
+                .faction("staff", 's')
+                .faction("public", 'p')
+                .entity_kind("staff door", '+')
+                .entity_kind("X-ray belt", 'X')
+                .entity_kind("gate B7", 'B');
+            run_with_optional_replay(
+                &mut sim, &mut scenario, options, ascii, repl,
+                replay_html_path.clone(), "airport infiltration",
+            )
+        }
         other => {
             eprintln!("unknown scenario: {other}");
-            eprintln!("available: home_invasion, farming, office, family_home, mansion");
+            eprintln!("available: home_invasion, farming, office, family_home, mansion, airport");
             std::process::exit(1);
         }
     };

@@ -140,6 +140,41 @@ pub enum Event {
         new_state: String,
         cause: String,
     },
+    /// A scripted dialog line played. `listener = None` means the
+    /// speaker is talking to themselves / out loud.
+    Spoke {
+        speaker: Entity,
+        listener: Option<Entity>,
+        text: String,
+    },
+    /// A question posed to a specific listener.
+    Asked {
+        speaker: Entity,
+        listener: Entity,
+        question: String,
+    },
+    /// A deceptive line. `believability` is in [0, 1]; less believable
+    /// lines bump observer suspicion.
+    Lied {
+        speaker: Entity,
+        listener: Entity,
+        text: String,
+        believability: f32,
+    },
+    /// An observer's suspicion of a target changed because of a
+    /// disguise mismatch, knowledge cross-check, or shaky story.
+    Observed {
+        observer: Entity,
+        target: Entity,
+        suspicion: f32,
+        reason: String,
+    },
+    /// An observer's suspicion crossed the alarm threshold. They are
+    /// no longer fooled and will act on it.
+    AlarmRaised {
+        observer: Entity,
+        target: Entity,
+    },
 }
 
 #[derive(Resource, Default)]
@@ -367,6 +402,41 @@ pub fn narrate(event: &Event, world: &World) -> String {
         Event::DoorStateChanged { door: _, new_state, cause } => {
             format!("A door is now {new_state} ({cause}).")
         }
+        Event::Spoke { speaker, listener, text } => match listener {
+            Some(l) => format!(
+                "{} says to {}: \"{}\"",
+                label(*speaker, world),
+                label(*l, world),
+                text,
+            ),
+            None => format!("{} mutters: \"{}\"", label(*speaker, world), text),
+        },
+        Event::Asked { speaker, listener, question } => format!(
+            "{} asks {}: \"{}\"",
+            label(*speaker, world),
+            label(*listener, world),
+            question,
+        ),
+        Event::Lied { speaker, listener, text, believability } => format!(
+            "{} tells {} (lie, believability {:.2}): \"{}\"",
+            label(*speaker, world),
+            label(*listener, world),
+            believability,
+            text,
+        ),
+        Event::Observed { observer, target, suspicion, reason } => format!(
+            "{} eyes {} ({}, suspicion {:.2} — {}).",
+            label(*observer, world),
+            label(*target, world),
+            crate::dialog::Suspicion::label(*suspicion),
+            suspicion,
+            reason,
+        ),
+        Event::AlarmRaised { observer, target } => format!(
+            "{} raises the alarm — {} is exposed!",
+            label(*observer, world),
+            label(*target, world),
+        ),
         Event::SoundEmitted {
             kind,
             position,
