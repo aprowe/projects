@@ -485,7 +485,11 @@ pub fn update_smell(world: &mut World) {
     }
 }
 
-fn line_of_sight_blocked(world: &World, a: Pos, b: Pos) -> bool {
+/// Returns true if a solid voxel sits between `a` and `b`. Used by
+/// the sight system internally and by scenario planners that want to
+/// check whether an entity can see a non-creature target (loot,
+/// furniture) without going through the full `Perceived` pipeline.
+pub fn line_of_sight_blocked(world: &World, a: Pos, b: Pos) -> bool {
     use crate::world::VoxelWorld;
     let voxel_world = world.resource::<VoxelWorld>();
     let dx = (b.x - a.x) as f32;

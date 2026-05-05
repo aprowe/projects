@@ -23,6 +23,9 @@
 
 use std::collections::HashSet;
 
+use fortress_engine::furniture::Container;
+use fortress_engine::line_of_sight_blocked;
+
 use fortress_engine::actions::{fill_region_logged, note, spawn_creature};
 use fortress_engine::library::{FurnitureSpawnOpts, ItemSpawnOpts};
 use fortress_engine::prelude::*;
@@ -109,6 +112,20 @@ const INVADER: &str = "invader";
 #[derive(Component)] pub struct Departed;
 #[derive(Component)] pub struct EnteredHouse;
 #[derive(Component)] pub struct Valuable;
+
+/// What an individual invader has *personally* observed: a set of
+/// loot entities they've seen on the floor, and a set of unopened
+/// containers they've spotted. The planner only targets things in
+/// these sets — they don't have global oracle knowledge.
+#[derive(Component, Default, Debug)]
+pub struct LooterMemory {
+    pub known_loot: HashSet<Entity>,
+    pub known_containers: HashSet<Entity>,
+    /// Rooms (by index into ROOMS) the invader has already swept.
+    pub explored_rooms: HashSet<usize>,
+    /// Which room the invader is currently searching, if any.
+    pub current_search: Option<usize>,
+}
 
 #[derive(Default)]
 pub struct MansionInvasion;
@@ -346,13 +363,13 @@ impl Scenario for MansionInvasion {
         place(world, "wall clock", Pos::new(29, 8, 0));
         place_painting(world, "oil portrait", Pos::new(33, 8, 0));
 
-        // ─── dining room ────────────────────────────────────────────
-        place(world, "dining table", Pos::new(10, 11, 0));
-        for (x, y) in [(8, 10), (12, 10), (8, 12), (12, 12), (10, 9), (10, 13)] {
+        // ─── dining room (table is 2x4: occupies x=9..10, y=9..12) ──
+        place(world, "dining table", Pos::new(9, 9, 0));
+        for (x, y) in [(7, 9), (12, 9), (7, 11), (12, 11)] {
             place(world, "dining chair", Pos::new(x, y, 0));
         }
-        place(world, "china cabinet", Pos::new(4, 9, 0));
-        place(world, "chandelier",    Pos::new(10, 11, 0));
+        place(world, "china cabinet", Pos::new(4, 8, 0));
+        place(world, "chandelier",    Pos::new(10, 13, 0));
         place_painting(world, "abstract canvas", Pos::new(15, 8, 0));
 
         // ─── kitchen ────────────────────────────────────────────────
@@ -361,10 +378,10 @@ impl Scenario for MansionInvasion {
         place(world, "microwave",     Pos::new(4, 21, 0));
         place(world, "dishwasher",    Pos::new(4, 23, 0));
         place(world, "kitchen sink",  Pos::new(15, 16, 0));
-        place(world, "kitchen island", Pos::new(10, 19, 0));
-        place(world, "dining chair",  Pos::new(9, 18, 0));
-        place(world, "dining chair",  Pos::new(11, 18, 0));
-        place(world, "ceiling fan",   Pos::new(10, 22, 0));
+        place(world, "kitchen island", Pos::new(8, 19, 0));   // 3x1, x=8..10
+        place(world, "dining chair",  Pos::new(8, 22, 0));
+        place(world, "dining chair",  Pos::new(10, 22, 0));
+        place(world, "ceiling fan",   Pos::new(13, 22, 0));
         place(world, "potted plant",  Pos::new(15, 23, 0));
 
         // ─── pantry ─────────────────────────────────────────────────
@@ -406,11 +423,14 @@ impl Scenario for MansionInvasion {
 
         // ─── master bedroom ─────────────────────────────────────────
         place(world, "king bed",   Pos::new(48, 9, 0));
-        place(world, "nightstand", Pos::new(46, 9, 0));
-        place(world, "nightstand", Pos::new(50, 9, 0));
+        place_container(world, "nightstand", Pos::new(46, 9, 0),
+            &["pearl earrings", "antique cufflinks"]);
+        place_container(world, "nightstand", Pos::new(50, 9, 0),
+            &["folded bills"]);
         place(world, "table lamp", Pos::new(46, 10, 0));
         place(world, "table lamp", Pos::new(50, 10, 0));
-        place(world, "dresser",    Pos::new(54, 12, 0));
+        place_container(world, "dresser", Pos::new(54, 12, 0),
+            &["watch collection", "wedding ring"]);
         place_container(
             world, "wardrobe", Pos::new(42, 9, 0),
             &["leather jacket", "wool shirt"],
@@ -431,18 +451,24 @@ impl Scenario for MansionInvasion {
         place(world, "bathroom sink",  Pos::new(43, 23, 0));
         place(world, "mirror",         Pos::new(43, 24, 0));
 
-        // ─── master closet ──────────────────────────────────────────
-        for x in 53..=55 {
-            place_container(world, "wardrobe", Pos::new(x, 21, 0), &["wool shirt"]);
-        }
-        place(world, "wall clock", Pos::new(56, 21, 0));
+        // ─── master closet (wardrobes are 2x1 each, space them out) ──
+        place_container(world, "wardrobe", Pos::new(52, 20, 0),
+            &["mink coat", "gold cufflinks"]);
+        place_container(world, "wardrobe", Pos::new(55, 20, 0),
+            &["evening dress", "silver chain"]);
+        place_container(world, "wardrobe", Pos::new(52, 23, 0),
+            &["dress shoes"]);
+        place_container(world, "wardrobe", Pos::new(55, 23, 0),
+            &["formal coat"]);
 
         // ─── kid bedroom ────────────────────────────────────────────
         place(world, "twin bed",     Pos::new(43, 28, 0));
         place(world, "twin bed",     Pos::new(48, 28, 0));
-        place(world, "nightstand",   Pos::new(45, 28, 0));
+        place_container(world, "nightstand", Pos::new(45, 28, 0),
+            &["piggy bank cash"]);
         place(world, "table lamp",   Pos::new(45, 29, 0));
-        place(world, "dresser",      Pos::new(50, 36, 0));
+        place_container(world, "dresser", Pos::new(50, 36, 0),
+            &["birthday card with cash"]);
         place(world, "bookshelf",    Pos::new(43, 36, 0));
         place(world, "books",        Pos::new(44, 36, 0));
         place(world, "potted plant", Pos::new(48, 36, 0));
@@ -549,19 +575,19 @@ impl Scenario for MansionInvasion {
         // ─── Invaders (entering through the open sliding glass door) ─
         // Stage them on the back deck, just outside.
         let brute = humanoid(world, "brute", Pos::new(28, DECK_Y_MIN + 2, 0), INVADER, 130, Stats::brute());
-        world.entity_mut(brute).insert(Invader);
+        world.entity_mut(brute).insert(Invader).insert(LooterMemory::default());
         equip(world, brute, &["leather jacket", "leather boots", "steel crowbar"]);
 
         let burglar_a = humanoid(world, "burglar_a", Pos::new(30, DECK_Y_MIN + 2, 0), INVADER, 90, Stats::rogue());
-        world.entity_mut(burglar_a).insert(Invader);
+        world.entity_mut(burglar_a).insert(Invader).insert(LooterMemory::default());
         equip(world, burglar_a, &["hoodie", "rubber boots", "hunting knife"]);
 
         let burglar_b = humanoid(world, "burglar_b", Pos::new(29, DECK_Y_MIN + 3, 0), INVADER, 85, Stats::rogue());
-        world.entity_mut(burglar_b).insert(Invader);
+        world.entity_mut(burglar_b).insert(Invader).insert(LooterMemory::default());
         equip(world, burglar_b, &["hoodie", "rubber boots", "brass candlestick"]);
 
         let burglar_c = humanoid(world, "burglar_c", Pos::new(27, DECK_Y_MIN + 3, 0), INVADER, 85, Stats::rogue());
-        world.entity_mut(burglar_c).insert(Invader);
+        world.entity_mut(burglar_c).insert(Invader).insert(LooterMemory::default());
         equip(world, burglar_c, &["hoodie", "leather boots", "frying pan"]);
 
         // Mark valuables (paintings + safe contents) as targets
@@ -581,6 +607,7 @@ impl Scenario for MansionInvasion {
                 derive_mood,
                 door_voxel_sync,
                 bystander_fear,
+                update_looter_memory,
                 family_planner,
                 invader_planner,
                 execute_tasks,
@@ -689,13 +716,12 @@ fn place_container(world: &mut World, template: &str, pos: Pos, contents: &[&str
         Ok(e) => e,
         Err(_) => return,
     };
-    // Spawn each item near the container as flavor — mark as Valuable
-    // so the invader planner picks them up. Real `Container` plumbing
-    // (open it, transfer items) is left for a future iteration; the
-    // proxy is "items sit on the same tile as the container".
+    // Spawn each named valuable as an entity but DO NOT give it a
+    // Position — the item lives inside the Container (no observer
+    // can see it) until someone opens the container, at which point
+    // `handle_container_open` drops the items at the container's tile.
+    let mut item_ids: Vec<Entity> = Vec::new();
     for &item_name in contents {
-        // Use the first available library item for the named valuable;
-        // if none matches, fall back to "kitchen knife" with override.
         let label = item_name.to_string();
         let template_name = if world.resource::<fortress_engine::Library>().items.contains_key(item_name) {
             item_name.to_string()
@@ -703,15 +729,18 @@ fn place_container(world: &mut World, template: &str, pos: Pos, contents: &[&str
             "kitchen knife".to_string()
         };
         let opts = ItemSpawnOpts {
-            at: Some(pos),
+            at: None,
             override_label: Some(label),
             ..Default::default()
         };
         if let Ok(item) = spawn_item_template(world, &template_name, opts) {
             world.entity_mut(item).insert(Valuable);
+            item_ids.push(item);
         }
     }
-    let _ = container;
+    if let Some(mut c) = world.get_mut::<Container>(container) {
+        c.items.extend(item_ids);
+    }
 }
 
 fn humanoid(
@@ -825,6 +854,60 @@ fn family_planner(world: &mut World) {
     }
 }
 
+/// Refresh each invader's `LooterMemory` based on what they can
+/// actually see this tick. Rather than re-using `Perceived.seen`
+/// (which only tracks living creatures), we run our own
+/// line-of-sight scan over Valuables and Containers — they're
+/// stationary, so the cost is small.
+fn update_looter_memory(world: &mut World) {
+    let looters: Vec<(Entity, Pos, i32)> = {
+        let mut q = world.query_filtered::<(Entity, &Position, &Sight), With<Invader>>();
+        q.iter(world).map(|(e, p, s)| (e, p.0, s.range)).collect()
+    };
+    let visible_loot: Vec<(Entity, Pos)> = {
+        let mut q = world.query_filtered::<(Entity, &Position), With<Valuable>>();
+        q.iter(world).map(|(e, p)| (e, p.0)).collect()
+    };
+    let visible_containers: Vec<(Entity, Pos, bool)> = {
+        let mut q = world.query::<(Entity, &Position, &Container)>();
+        q.iter(world).map(|(e, p, c)| (e, p.0, c.open)).collect()
+    };
+
+    for (looter, lpos, range) in looters {
+        let mut new_loot: Vec<Entity> = Vec::new();
+        let mut new_containers: Vec<Entity> = Vec::new();
+        for (item, ipos) in &visible_loot {
+            if lpos.chebyshev(*ipos) > range {
+                continue;
+            }
+            if line_of_sight_blocked(world, lpos, *ipos) {
+                continue;
+            }
+            new_loot.push(*item);
+        }
+        for (cont, cpos, open) in &visible_containers {
+            if *open {
+                continue;
+            }
+            if lpos.chebyshev(*cpos) > range {
+                continue;
+            }
+            if line_of_sight_blocked(world, lpos, *cpos) {
+                continue;
+            }
+            new_containers.push(*cont);
+        }
+        if let Some(mut mem) = world.get_mut::<LooterMemory>(looter) {
+            for e in new_loot {
+                mem.known_loot.insert(e);
+            }
+            for e in new_containers {
+                mem.known_containers.insert(e);
+            }
+        }
+    }
+}
+
 fn invader_planner(world: &mut World) {
     let invader_ids: HashSet<Entity> = {
         let mut q = world.query_filtered::<Entity, (With<Invader>, Without<Departed>)>();
@@ -838,11 +921,6 @@ fn invader_planner(world: &mut World) {
         q.iter(world)
             .map(|(e, p, g, q)| (e, p.0, g.clone(), q.is_empty()))
             .collect()
-    };
-
-    let valuables: Vec<(Entity, Pos)> = {
-        let mut q = world.query_filtered::<(Entity, &Position), With<Valuable>>();
-        q.iter(world).map(|(e, p)| (e, p.0)).collect()
     };
 
     let closed_doors: Vec<(Entity, Pos)> = {
@@ -859,7 +937,7 @@ fn invader_planner(world: &mut World) {
             continue;
         }
 
-        // Step 1: visible target
+        // Step 1: visible hostile (a member of the family)
         let visible_target = world.get::<Perceived>(invader).and_then(|p| {
             p.seen
                 .iter()
@@ -884,7 +962,7 @@ fn invader_planner(world: &mut World) {
             continue;
         }
 
-        // Step 2: heard violent noise
+        // Step 2: heard violent noise — investigate
         let noise = world
             .get::<Perceived>(invader)
             .and_then(|p| p.loudest_violent().map(|hs| hs.origin));
@@ -903,54 +981,32 @@ fn invader_planner(world: &mut World) {
             continue;
         }
 
-        // Step 3: nearest reachable valuable. Sort by manhattan
-        // distance and take the first one we can actually pathfind
-        // to (avoids spinning forever on a valuable behind a locked
-        // door).
-        let mut sorted_loot: Vec<(Entity, Pos)> = valuables.clone();
-        sorted_loot.sort_by_key(|(_, vp)| pos.manhattan(*vp));
+        // Snapshot memory once (we'll mutate selection below, but
+        // selection is informational — not stored back).
+        let (known_loot, known_containers) = {
+            let mem = match world.get::<LooterMemory>(invader) {
+                Some(m) => m,
+                None => continue,
+            };
+            (
+                mem.known_loot.iter().copied().collect::<Vec<_>>(),
+                mem.known_containers.iter().copied().collect::<Vec<_>>(),
+            )
+        };
+
+        // Step 3: pick from KNOWN loot we've seen with our own eyes.
+        // Filter to ones still on the floor (others got picked up).
+        let mut loot_candidates: Vec<(Entity, Pos)> = known_loot
+            .iter()
+            .filter_map(|&e| world.get::<Position>(e).map(|p| (e, p.0)))
+            .collect();
+        loot_candidates.sort_by_key(|(_, vp)| pos.manhattan(*vp));
         let target_loot: Option<(Entity, Pos)> = {
             let vw = world.resource::<VoxelWorld>();
-            sorted_loot
+            loot_candidates
                 .into_iter()
                 .find(|(_, vp)| find_path(vw, pos, *vp, 4096).is_some())
         };
-
-        let primary_dest = target_loot
-            .map(|(_, p)| p)
-            .unwrap_or(BACK_YARD_END);
-
-        let reachable = {
-            let vw = world.resource::<VoxelWorld>();
-            find_path(vw, pos, primary_dest, 4096).is_some()
-        };
-
-        if !reachable {
-            let door_choice = closed_doors
-                .iter()
-                .copied()
-                .filter_map(|(door, door_pos)| {
-                    let vw = world.resource::<VoxelWorld>();
-                    let approach = approach_tile(pos, door_pos);
-                    find_path(vw, pos, approach, 4096).map(|_| (door, door_pos, pos.manhattan(door_pos)))
-                })
-                .min_by_key(|(_, _, d)| *d);
-            if let Some((door_entity, door_pos, _)) = door_choice {
-                let approach = approach_tile(pos, door_pos);
-                if let Some(mut q) = world.get_mut::<TaskQueue>(invader) {
-                    q.clear();
-                    if pos != approach {
-                        q.push(Task::MoveTo(approach));
-                    }
-                    q.push(Task::UseEntity(door_entity));
-                }
-                if let Some(mut g) = world.get_mut::<Goal>(invader) {
-                    *g = Goal::Tend(door_entity);
-                }
-                world.entity_mut(invader).insert(Locomotion::Walking);
-                continue;
-            }
-        }
 
         if let Some((item, item_pos)) = target_loot {
             let already = matches!(goal, Goal::Tend(e) if e == item);
@@ -968,6 +1024,91 @@ fn invader_planner(world: &mut World) {
             continue;
         }
 
+        // Step 4: any unopened container we know about?
+        let mut container_candidates: Vec<(Entity, Pos)> = known_containers
+            .iter()
+            .filter(|&&e| {
+                world.get::<Container>(e).map(|c| !c.open).unwrap_or(false)
+            })
+            .filter_map(|&e| world.get::<Position>(e).map(|p| (e, p.0)))
+            .collect();
+        container_candidates.sort_by_key(|(_, cp)| pos.manhattan(*cp));
+        let target_container: Option<(Entity, Pos)> = {
+            let vw = world.resource::<VoxelWorld>();
+            container_candidates
+                .into_iter()
+                .find(|(_, cp)| {
+                    let approach = approach_tile(pos, *cp);
+                    find_path(vw, pos, approach, 4096).is_some()
+                })
+        };
+
+        if let Some((cont, cont_pos)) = target_container {
+            let approach = approach_tile(pos, cont_pos);
+            if let Some(mut q) = world.get_mut::<TaskQueue>(invader) {
+                q.clear();
+                if pos != approach {
+                    q.push(Task::MoveTo(approach));
+                }
+                q.push(Task::UseEntity(cont));
+            }
+            if let Some(mut g) = world.get_mut::<Goal>(invader) {
+                *g = Goal::Tend(cont);
+            }
+            world.entity_mut(invader).insert(Locomotion::Walking);
+            continue;
+        }
+
+        // Step 5: nothing in memory — search a new room. Pick the
+        // closest unexplored room anchor and walk there. As we move,
+        // `update_looter_memory` will log what we see along the way.
+        let next_room = pick_next_search_room(world, invader, pos);
+        if let Some((room_idx, anchor)) = next_room {
+            if let Some(mut mem) = world.get_mut::<LooterMemory>(invader) {
+                mem.current_search = Some(room_idx);
+            }
+            let reachable_anchor = {
+                let vw = world.resource::<VoxelWorld>();
+                find_path(vw, pos, anchor, 4096).is_some()
+            };
+            if !reachable_anchor {
+                // The room is sealed by a closed door — try to break in.
+                if let Some((door, door_pos)) = nearest_blocking_door(world, pos, anchor, &closed_doors) {
+                    let approach = approach_tile(pos, door_pos);
+                    if let Some(mut q) = world.get_mut::<TaskQueue>(invader) {
+                        q.clear();
+                        if pos != approach {
+                            q.push(Task::MoveTo(approach));
+                        }
+                        q.push(Task::UseEntity(door));
+                    }
+                    if let Some(mut g) = world.get_mut::<Goal>(invader) {
+                        *g = Goal::Tend(door);
+                    }
+                    world.entity_mut(invader).insert(Locomotion::Walking);
+                    continue;
+                }
+                // No way in — give up on this room.
+                if let Some(mut mem) = world.get_mut::<LooterMemory>(invader) {
+                    mem.explored_rooms.insert(room_idx);
+                    mem.current_search = None;
+                }
+                continue;
+            }
+            if !matches!(goal, Goal::GoTo(p) if p == anchor) || queue_empty {
+                if let Some(mut q) = world.get_mut::<TaskQueue>(invader) {
+                    q.clear();
+                    q.push(Task::MoveTo(anchor));
+                }
+                if let Some(mut g) = world.get_mut::<Goal>(invader) {
+                    *g = Goal::GoTo(anchor);
+                }
+                world.entity_mut(invader).insert(Locomotion::Walking);
+            }
+            continue;
+        }
+
+        // Step 6: nothing left to search — leave through the back.
         let leaving = matches!(goal, Goal::GoTo(p) if p == BACK_YARD_END);
         if !leaving || queue_empty {
             if let Some(mut q) = world.get_mut::<TaskQueue>(invader) {
@@ -980,6 +1121,75 @@ fn invader_planner(world: &mut World) {
             world.entity_mut(invader).insert(Locomotion::Walking);
         }
     }
+}
+
+/// Pick the next room to search: prefer rooms we can reach now,
+/// closest first; if none are directly reachable, fall back to the
+/// closest unexplored room (the planner will then route through a
+/// closed door). Returns `None` when every room has been visited.
+fn pick_next_search_room(world: &mut World, invader: Entity, pos: Pos) -> Option<(usize, Pos)> {
+    // First, mark any room we're currently inside as explored.
+    {
+        let mut newly: Vec<usize> = Vec::new();
+        for (i, (_, x_min, x_max, y_min, y_max, _)) in ROOMS.iter().enumerate() {
+            if pos.x >= *x_min && pos.x <= *x_max && pos.y >= *y_min && pos.y <= *y_max {
+                newly.push(i);
+            }
+        }
+        if let Some(mut mem) = world.get_mut::<LooterMemory>(invader) {
+            for i in newly {
+                mem.explored_rooms.insert(i);
+            }
+        }
+    }
+    let explored = world
+        .get::<LooterMemory>(invader)
+        .map(|m| m.explored_rooms.clone())
+        .unwrap_or_default();
+
+    let mut reachable: Option<(usize, Pos, i32)> = None;
+    let mut blocked: Option<(usize, Pos, i32)> = None;
+    for (i, (_, x_min, x_max, y_min, y_max, _)) in ROOMS.iter().enumerate() {
+        if explored.contains(&i) {
+            continue;
+        }
+        let cx = (x_min + x_max) / 2;
+        let cy = (y_min + y_max) / 2;
+        let anchor = Pos::new(cx, cy, 0);
+        let d = pos.manhattan(anchor);
+        let path_exists = {
+            let vw = world.resource::<VoxelWorld>();
+            find_path(vw, pos, anchor, 4096).is_some()
+        };
+        if path_exists {
+            if reachable.map(|(_, _, bd)| d < bd).unwrap_or(true) {
+                reachable = Some((i, anchor, d));
+            }
+        } else if blocked.map(|(_, _, bd)| d < bd).unwrap_or(true) {
+            blocked = Some((i, anchor, d));
+        }
+    }
+    reachable.or(blocked).map(|(i, a, _)| (i, a))
+}
+
+/// Among `closed_doors` reachable from `from`, return the one whose
+/// approach tile is closest to `to`. That's the door most likely to
+/// be ON the path between us and our target room.
+fn nearest_blocking_door(
+    world: &mut World,
+    from: Pos,
+    to: Pos,
+    closed_doors: &[(Entity, Pos)],
+) -> Option<(Entity, Pos)> {
+    let vw = world.resource::<VoxelWorld>();
+    closed_doors
+        .iter()
+        .copied()
+        .filter(|(_, dp)| {
+            let approach = approach_tile(from, *dp);
+            find_path(vw, from, approach, 4096).is_some()
+        })
+        .min_by_key(|(_, dp)| dp.manhattan(to))
 }
 
 fn approach_tile(from: Pos, door_pos: Pos) -> Pos {
@@ -1006,6 +1216,13 @@ fn handle_door_use(world: &mut World) {
         .collect();
 
     for (user, target) in attempts {
+        // Container? Open it (running a manipulation/strength check
+        // if locked) and dump its contents at the container's tile.
+        if world.get::<Container>(target).is_some() {
+            handle_one_container_open(world, user, target, tick);
+            continue;
+        }
+
         let door_data = world
             .get::<Door>(target)
             .map(|d| (d.state, d.lock_dc, d.break_dc, d.label.clone()));
@@ -1080,6 +1297,71 @@ fn handle_door_use(world: &mut World) {
             }
             DoorState::Broken => {}
         }
+    }
+}
+
+fn handle_one_container_open(world: &mut World, user: Entity, target: Entity, tick: u64) {
+    let (already_open, locked, lock_dc, container_pos, container_kind) = {
+        let c = match world.get::<Container>(target) {
+            Some(c) => c.clone_metadata(),
+            None => return,
+        };
+        let pos = world.get::<Position>(target).map(|p| p.0).unwrap_or_default();
+        let kind = world.get::<Kind>(target).map(|k| k.0.clone()).unwrap_or_else(|| "container".into());
+        (c.0, c.1, c.2, pos, kind)
+    };
+    if already_open {
+        return;
+    }
+    if locked {
+        // Strength check to force the lock open.
+        let outcome = strength_check(world, user, lock_dc);
+        let (success, roll, impossible) = unpack_check(&outcome);
+        world.resource_mut::<EventLog>().push(
+            tick,
+            Event::AbilityCheck {
+                actor: user,
+                kind: "force open".into(),
+                target: format!("the {container_kind}"),
+                roll,
+                dc: lock_dc,
+                success,
+                impossible,
+            },
+        );
+        if !success {
+            return;
+        }
+    }
+    // Drop every item at the container's tile so observers
+    // (including other invaders) can see and pick it up.
+    let items: Vec<Entity> = {
+        let mut c = match world.get_mut::<Container>(target) {
+            Some(c) => c,
+            None => return,
+        };
+        c.open = true;
+        std::mem::take(&mut c.items)
+    };
+    for item in &items {
+        world.entity_mut(*item).insert(Position(container_pos));
+    }
+    let actor_label = label_kind(world, user);
+    world.resource_mut::<EventLog>().push(
+        tick,
+        Event::Note(format!(
+            "{actor_label} pulls open the {container_kind} — {} items spill out.",
+            items.len()
+        )),
+    );
+}
+
+trait ContainerMetadata {
+    fn clone_metadata(&self) -> (bool, bool, i32);
+}
+impl ContainerMetadata for Container {
+    fn clone_metadata(&self) -> (bool, bool, i32) {
+        (self.open, self.locked, self.lock_dc)
     }
 }
 

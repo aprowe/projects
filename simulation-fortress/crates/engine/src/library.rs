@@ -77,14 +77,20 @@ pub struct RoleTemplate {
 
 /// A piece of furniture in the catalog. Each template knows its
 /// kind, its glyph (for ASCII renderers), the material it's made of,
-/// optional ambient sound + heat (for `Powered` appliances), and an
-/// `extras` callback for the rare attribute that doesn't fit any
-/// standard slot.
+/// its footprint in voxel tiles (a king bed is 2x3, a couch is 3x1,
+/// a pool is 4x4), and optional state specs (powered/container/
+/// window/painting/rug/light) that the spawn helper stamps onto the
+/// anchor entity.
 #[derive(Clone, Debug)]
 pub struct FurnitureTemplate {
     pub kind: FurnitureKind,
     pub glyph: char,
     pub material: Option<String>,
+    /// Footprint, in tiles, as `(width_x, depth_y)`. `(1, 1)` is the
+    /// default — a single-tile entity. The spawn helper places one
+    /// entity per tile (so the renderer sees the glyph repeated)
+    /// and stamps state components onto the anchor (top-left) tile.
+    pub size: (u8, u8),
     pub powered: Option<PoweredSpec>,
     pub container: Option<ContainerSpec>,
     pub window: Option<WindowSpec>,
@@ -439,10 +445,18 @@ pub struct FurnitureSpawnOpts {
     pub kind_label: Option<String>,
 }
 
-/// Spawn a furniture entity from a template. Always positioned. The
-/// `Kind` defaults to the template name; pass `kind_label` to
-/// override (so you can have e.g. two different paintings named
-/// "Sunset Over Lake" and "Portrait of Mrs. Vance").
+/// Spawn a furniture entity from a template. Multi-tile templates
+/// (a 3x1 sofa, a 2x3 king bed, a 5x3 pool) stamp one entity per
+/// tile so the renderer paints the glyph across the full footprint.
+/// State components (`Powered`, `Container`, `Window`, `Painting`,
+/// `Rug`, `LightSource`) live ONLY on the anchor entity (top-left
+/// of the footprint) — that's the "interaction tile" planners walk
+/// up to. The returned `Entity` is the anchor.
+///
+/// Blocking furniture (`FurnitureKind::blocks_tile()`) also stamps
+/// a wall voxel of its `material` at every footprint tile, so the
+/// pathfinder treats the whole sofa as impassable instead of letting
+/// actors walk through it.
 pub fn spawn_furniture_template(
     world: &mut World,
     template_name: &str,
@@ -462,18 +476,67 @@ pub fn spawn_furniture_template(
     };
 
     let label = opts.kind_label.unwrap_or_else(|| template_name.to_string());
+    let (w, d) = template.size;
+    let w = w.max(1) as i32;
+    let d = d.max(1) as i32;
 
+    // Spawn the anchor first.
+    let anchor_pos = opts.at;
     let id = world
         .spawn((
-            Position(opts.at),
-            Kind(label),
+            Position(anchor_pos),
+            Kind(label.clone()),
             Furniture(template.kind),
         ))
         .id();
-
     if let Some(mat) = material_id {
         world.entity_mut(id).insert(ItemMaterial(mat));
     }
+
+    // Spawn one extra entity per footprint tile beyond the anchor.
+    // These get a Position + Kind + Furniture so the renderer paints
+    // them, but no state components — the anchor owns those.
+    for dx in 0..w {
+        for dy in 0..d {
+            if dx == 0 && dy == 0 {
+                continue;
+            }
+            let tile = crate::world::Pos::new(anchor_pos.x + dx, anchor_pos.y + dy, anchor_pos.z);
+            let tile_id = world
+                .spawn((
+                    Position(tile),
+                    Kind(label.clone()),
+                    Furniture(template.kind),
+                ))
+                .id();
+            if let Some(mat) = material_id {
+                world.entity_mut(tile_id).insert(ItemMaterial(mat));
+            }
+        }
+    }
+
+    // Optionally stamp wall voxels for the whole footprint so paths
+    // route around the sofa instead of over it. Outdoor + decor +
+    // floor-coverings + lighting + wall art don't block. Open
+    // windows / sliding doors don't block either.
+    let window_open = matches!(&template.window, Some(w) if !w.closed);
+    if template.kind.blocks_tile() && !window_open {
+        if let Some(mat) = material_id {
+            let mut vw = world.resource_mut::<VoxelWorld>();
+            let voxel = crate::world::Voxel::wall(mat);
+            for dx in 0..w {
+                for dy in 0..d {
+                    let tile = crate::world::Pos::new(
+                        anchor_pos.x + dx,
+                        anchor_pos.y + dy,
+                        anchor_pos.z,
+                    );
+                    vw.set_voxel(tile, voxel);
+                }
+            }
+        }
+    }
+
     if let Some(p) = template.powered {
         let mut comp = if p.on {
             Powered::on(p.label, p.source)
@@ -811,6 +874,7 @@ fn populate_furniture(lib: &mut Library) {
             kind,
             glyph,
             material: Some(material.into()),
+            size: (1, 1),
             powered: None,
             container: None,
             window: None,
@@ -818,6 +882,18 @@ fn populate_furniture(lib: &mut Library) {
             rug: None,
             light_lumens: None,
             description: desc.into(),
+        }
+    }
+    fn sized(
+        kind: FurnitureKind,
+        glyph: char,
+        material: &str,
+        size: (u8, u8),
+        desc: &str,
+    ) -> FurnitureTemplate {
+        FurnitureTemplate {
+            size,
+            ..base(kind, glyph, material, desc)
         }
     }
     fn pwr(label: &str, src: PowerSource, on: bool, ambient: Option<(SoundKind, f32)>, heat: f32)
@@ -834,32 +910,36 @@ fn populate_furniture(lib: &mut Library) {
 
     let entries: &[(&str, FurnitureTemplate)] = &[
         // ─── seating ──────────────────────────────────────────────
-        ("sofa",         base(Seating, 's', "velvet", "long upholstered couch")),
-        ("armchair",     base(Seating, 'a', "leather", "single-seat lounge chair")),
-        ("dining chair", base(Seating, 'h', "oak",   "wooden chair at the dining table")),
-        ("bench",        base(Seating, 'b', "oak",   "long bench in the foyer")),
-        ("ottoman",      base(Seating, 'o', "velvet", "footrest")),
-        ("recliner",     base(Seating, 'r', "leather", "reclining lounge chair")),
+        ("sofa",         sized(Seating, 's', "velvet",  (3, 1), "long upholstered couch — 3 tiles wide")),
+        ("loveseat",     sized(Seating, 's', "velvet",  (2, 1), "small couch for two")),
+        ("armchair",     sized(Seating, 'a', "leather", (1, 1), "single-seat lounge chair")),
+        ("dining chair", sized(Seating, 'h', "oak",     (1, 1), "wooden chair at the dining table")),
+        ("bench",        sized(Seating, 'b', "oak",     (3, 1), "long bench in the foyer")),
+        ("ottoman",      sized(Seating, 'o', "velvet",  (1, 1), "footrest")),
+        ("recliner",     sized(Seating, 'r', "leather", (1, 1), "reclining lounge chair")),
 
         // ─── beds ─────────────────────────────────────────────────
-        ("king bed",   base(Bed, 'B', "oak", "king-size four-poster")),
-        ("queen bed",  base(Bed, 'B', "oak", "queen-size bed")),
-        ("twin bed",   base(Bed, 'b', "pine", "single twin")),
-        ("crib",       base(Bed, 'c', "pine", "infant crib")),
+        ("king bed",   sized(Bed, 'B', "oak",  (2, 3), "king-size four-poster")),
+        ("queen bed",  sized(Bed, 'B', "oak",  (2, 3), "queen-size bed")),
+        ("twin bed",   sized(Bed, 'b', "pine", (1, 2), "single twin")),
+        ("crib",       sized(Bed, 'c', "pine", (1, 2), "infant crib")),
 
         // ─── storage ───────────────────────────────────────────────
         ("wardrobe",
             FurnitureTemplate {
+                size: (2, 1),
                 container: Some(ContainerSpec { locked: false, lock_dc: 0 }),
                 ..base(Storage, 'W', "oak", "tall closet wardrobe")
             }),
         ("dresser",
             FurnitureTemplate {
+                size: (2, 1),
                 container: Some(ContainerSpec { locked: false, lock_dc: 0 }),
                 ..base(Storage, 'D', "oak", "five-drawer dresser")
             }),
         ("locked dresser",
             FurnitureTemplate {
+                size: (2, 1),
                 container: Some(ContainerSpec { locked: true, lock_dc: 14 }),
                 ..base(Storage, 'D', "oak", "dresser with a locked top drawer")
             }),
@@ -870,11 +950,13 @@ fn populate_furniture(lib: &mut Library) {
             }),
         ("bookshelf",
             FurnitureTemplate {
+                size: (1, 2),
                 container: Some(ContainerSpec { locked: false, lock_dc: 0 }),
                 ..base(Storage, 'L', "oak", "tall bookshelf")
             }),
         ("china cabinet",
             FurnitureTemplate {
+                size: (2, 1),
                 container: Some(ContainerSpec { locked: false, lock_dc: 0 }),
                 ..base(Storage, 'C', "oak", "glass-front china cabinet")
             }),
@@ -890,11 +972,11 @@ fn populate_furniture(lib: &mut Library) {
             }),
 
         // ─── tables ────────────────────────────────────────────────
-        ("dining table",  base(Table, 't', "oak", "long dining table")),
-        ("coffee table",  base(Table, 'c', "oak", "low living-room table")),
-        ("desk",          base(Table, 'd', "oak", "writing desk")),
-        ("kitchen island", base(Table, 'i', "granite", "kitchen island with stone top")),
-        ("side table",    base(Table, 's', "oak", "small side table")),
+        ("dining table",  sized(Table, 't', "oak",     (2, 4), "long dining table")),
+        ("coffee table",  sized(Table, 'c', "oak",     (2, 1), "low living-room table")),
+        ("desk",          sized(Table, 'd', "oak",     (2, 1), "writing desk")),
+        ("kitchen island", sized(Table, 'i', "granite", (3, 1), "kitchen island with stone top")),
+        ("side table",    sized(Table, 's', "oak",     (1, 1), "small side table")),
 
         // ─── appliances ────────────────────────────────────────────
         ("tv set",
@@ -972,11 +1054,11 @@ fn populate_furniture(lib: &mut Library) {
             }),
 
         // ─── plumbing ──────────────────────────────────────────────
-        ("toilet",   base(Plumbing, 'u', "porcelain", "porcelain toilet")),
-        ("bathroom sink", base(Plumbing, 'k', "porcelain", "pedestal sink")),
-        ("kitchen sink", base(Plumbing, 'K', "steel", "stainless double-basin sink")),
-        ("bathtub",  base(Plumbing, 'U', "porcelain", "claw-foot tub")),
-        ("shower",   base(Plumbing, 'H', "tile", "glass-walled shower")),
+        ("toilet",        sized(Plumbing, 'u', "porcelain", (1, 1), "porcelain toilet")),
+        ("bathroom sink", sized(Plumbing, 'k', "porcelain", (1, 1), "pedestal sink")),
+        ("kitchen sink",  sized(Plumbing, 'K', "steel",     (2, 1), "stainless double-basin sink")),
+        ("bathtub",       sized(Plumbing, 'U', "porcelain", (1, 2), "claw-foot tub")),
+        ("shower",        sized(Plumbing, 'H', "tile",      (2, 2), "glass-walled shower")),
 
         // ─── lighting ──────────────────────────────────────────────
         ("table lamp",
@@ -1107,11 +1189,11 @@ fn populate_furniture(lib: &mut Library) {
             }),
         ("patio chair", base(Outdoor, 'h', "aluminum", "weather-resistant chair")),
         ("patio table", base(Outdoor, 't', "aluminum", "round patio table")),
-        ("hammock",     base(Outdoor, '~', "cotton", "rope hammock between two posts")),
-        ("mailbox",     base(Outdoor, 'M', "aluminum", "curbside mailbox on a post")),
-        ("garden gnome", base(Outdoor, 'g', "ceramic", "smug little ceramic gnome")),
-        ("pool",        base(Outdoor, '~', "tile", "in-ground swimming pool")),
-        ("hot tub",     base(Outdoor, '@', "tile", "outdoor hot tub")),
+        ("hammock",      sized(Outdoor, '~', "cotton",   (3, 1), "rope hammock between two posts")),
+        ("mailbox",      sized(Outdoor, 'M', "aluminum", (1, 1), "curbside mailbox on a post")),
+        ("garden gnome", sized(Outdoor, 'g', "ceramic",  (1, 1), "smug little ceramic gnome")),
+        ("pool",         sized(Outdoor, '~', "tile",     (5, 3), "in-ground swimming pool")),
+        ("hot tub",      sized(Outdoor, '@', "tile",     (2, 2), "outdoor hot tub")),
     ];
 
     for (name, tmpl) in entries {

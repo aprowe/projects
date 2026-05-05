@@ -78,9 +78,9 @@ pub use rng::Rng;
 pub use scenario::Scenario;
 pub use simulation::{RunOptions, Simulation};
 pub use sound::{
-    emit_combat_sounds, emit_movement_sounds, emit_scream, update_hearing, update_sight,
-    update_smell, HeardSound, Hearing, Perceived, SeenEntity, Sight, Smell, SmelledOdor,
-    SoundKind,
+    emit_combat_sounds, emit_movement_sounds, emit_scream, line_of_sight_blocked, update_hearing,
+    update_sight, update_smell, HeardSound, Hearing, Perceived, SeenEntity, Sight, Smell,
+    SmelledOdor, SoundKind,
 };
 pub use tasks::{
     execute_tasks, retaliation_system, Goal, RetaliateOnAttack, Task, TaskQueue,
