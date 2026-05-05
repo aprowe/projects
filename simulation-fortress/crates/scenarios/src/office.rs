@@ -12,9 +12,9 @@ use fortress_engine::actions::{fill_region_logged, note};
 use fortress_engine::library::RoleSpawnOpts;
 use fortress_engine::prelude::*;
 use fortress_engine::{
-    derive_mood, execute_tasks, spawn_role_template, tick_needs, Clock, Energy, Event, EventLog,
-    Goal, Hunger, Kind, Material, Mood, Position, Pos, Rng, Scenario, Task, TaskQueue, Voxel,
-    VoxelWorld,
+    derive_mood, eat_on_use, execute_tasks, spawn_role_template, tick_needs, Clock, Edible,
+    Energy, Event, EventLog, Goal, Hunger, Kind, Material, Mood, Position, Pos, Rng, Scenario,
+    Task, TaskQueue, Voxel, VoxelWorld,
 };
 
 const OFFICE: &str = "office";
@@ -41,11 +41,6 @@ pub struct Desk {
     pub assigned: Option<Entity>,
 }
 
-/// Marker for the coffee/snack station. The engine doesn't ship a
-/// generic `Edible` component yet, so the scenario reacts to
-/// `EntityUsed` events targeting this marker.
-#[derive(Component)]
-pub struct CoffeeStation;
 
 #[derive(Default)]
 pub struct OfficeDrama;
@@ -70,11 +65,12 @@ impl Scenario for OfficeDrama {
         fill_region_logged(world, ROOM_MIN, ROOM_MAX, Voxel::floor(carpet));
         note(world, "Five workers file in, mugs and laptops in tow.");
 
-        // Coffee station along one wall.
+        // Coffee station along one wall — Edible::coffee bumps both
+        // hunger and energy when used.
         world.spawn((
-            CoffeeStation,
             Kind("coffee_station".into()),
             Position(COFFEE_POS),
+            Edible::coffee(),
         ));
 
         // Four desks scattered through the room.
@@ -120,7 +116,8 @@ impl Scenario for OfficeDrama {
                 derive_mood,
                 worker_planner,
                 execute_tasks,
-                handle_coffee_use,
+                eat_on_use,
+                narrate_coffee,
                 handle_desk_use,
                 gossip_event,
             )
@@ -135,9 +132,10 @@ impl Scenario for OfficeDrama {
 }
 
 fn worker_planner(world: &mut World) {
-    // Coffee station: there's always one.
+    // Coffee station: there's always one. We find it by Edible — in
+    // a more complex office we'd filter by Kind too.
     let coffee: Option<(Entity, Pos)> = {
-        let mut q = world.query_filtered::<(Entity, &Position), With<CoffeeStation>>();
+        let mut q = world.query_filtered::<(Entity, &Position), With<Edible>>();
         q.iter(world).map(|(e, p)| (e, p.0)).next()
     };
 
@@ -235,7 +233,9 @@ fn worker_planner(world: &mut World) {
     }
 }
 
-fn handle_coffee_use(world: &mut World) {
+/// Narration only — the engine's `eat_on_use` already updated
+/// hunger/energy from the `Edible::coffee()` template values.
+fn narrate_coffee(world: &mut World) {
     let tick = world.resource::<Clock>().tick;
     let used: Vec<(Entity, Entity)> = world
         .resource::<EventLog>()
@@ -247,14 +247,8 @@ fn handle_coffee_use(world: &mut World) {
         .collect();
 
     for (user, target) in used {
-        if world.get::<CoffeeStation>(target).is_none() {
+        if world.get::<Edible>(target).is_none() {
             continue;
-        }
-        if let Some(mut h) = world.get_mut::<Hunger>(user) {
-            h.feed(0.7);
-        }
-        if let Some(mut e) = world.get_mut::<Energy>(user) {
-            e.rest(0.4);
         }
         push_note(
             world,

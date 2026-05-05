@@ -91,6 +91,11 @@ pub enum Event {
         hazard: String,
         prone_ticks: u32,
     },
+    /// Emitted when a creature with `Fear` crosses the "terrified"
+    /// threshold for the first time during a combat exchange.
+    Terrified {
+        entity: Entity,
+    },
 }
 
 #[derive(Resource, Default)]
@@ -252,6 +257,9 @@ pub fn narrate(event: &Event, world: &World) -> String {
             hazard,
             prone_ticks,
         ),
+        Event::Terrified { entity } => {
+            format!("{} is wide-eyed with terror.", label(*entity, world))
+        }
         Event::BodyPartDestroyed {
             entity,
             part,

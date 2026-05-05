@@ -12,7 +12,10 @@
 //! scenarios can write their own mood system if they want a different
 //! formula.
 
-use bevy_ecs::prelude::{Component, Query};
+use bevy_ecs::prelude::{Component, Entity, Query, World};
+
+use crate::log::{Event, EventLog};
+use crate::time::Clock;
 
 /// Hunger drifts upward toward 1.0; eating drops it back toward 0.
 #[derive(Component, Copy, Clone, Debug)]
@@ -158,6 +161,103 @@ pub fn tick_needs(
     }
     for mut f in &mut fear_q {
         f.current = (f.current - f.decay_rate).max(0.0);
+    }
+}
+
+/// Anything edible. Attached to a food item, a feeding trough, a
+/// kitchen, a coffee station — whatever a creature can `UseEntity`
+/// to satisfy hunger. The `eat_on_use` system reduces the user's
+/// `Hunger` by `satiation` and bumps `Energy` by `refreshment`.
+#[derive(Component, Copy, Clone, Debug)]
+pub struct Edible {
+    /// Hunger reduction in `[0.0, 1.0]`. 1.0 fully sates; 0.4 a snack.
+    pub satiation: f32,
+    /// Energy bump in `[0.0, 1.0]`. 0 = food only; 0.4 = coffee.
+    pub refreshment: f32,
+}
+
+impl Edible {
+    pub fn meal() -> Self {
+        Self {
+            satiation: 1.0,
+            refreshment: 0.0,
+        }
+    }
+
+    pub fn snack(satiation: f32) -> Self {
+        Self {
+            satiation,
+            refreshment: 0.0,
+        }
+    }
+
+    pub fn coffee() -> Self {
+        Self {
+            satiation: 0.6,
+            refreshment: 0.4,
+        }
+    }
+}
+
+/// When `Event::EntityUsed { user, target }` fires and `target` has
+/// an `Edible` component, drop `user`'s `Hunger` and bump their
+/// `Energy` accordingly. Run after `execute_tasks` (which emits
+/// `EntityUsed`) and after the engine's narration systems.
+pub fn eat_on_use(world: &mut World) {
+    let tick = world.resource::<Clock>().tick;
+    let used: Vec<(Entity, Entity)> = world
+        .resource::<EventLog>()
+        .events_at(tick)
+        .filter_map(|e| match e {
+            Event::EntityUsed { user, target } => Some((*user, *target)),
+            _ => None,
+        })
+        .collect();
+
+    for (user, target) in used {
+        let edible = match world.get::<Edible>(target) {
+            Some(e) => *e,
+            None => continue,
+        };
+        if let Some(mut h) = world.get_mut::<Hunger>(user) {
+            h.feed(edible.satiation);
+        }
+        if edible.refreshment > 0.0 {
+            if let Some(mut e) = world.get_mut::<Energy>(user) {
+                e.rest(edible.refreshment);
+            }
+        }
+    }
+}
+
+/// When a creature with `Fear` is wounded in combat, spike their
+/// fear. If the spike crosses the "terrified" threshold, emit
+/// `Event::Terrified` once so the narrator can flag it.
+pub fn fear_from_combat(world: &mut World) {
+    let tick = world.resource::<Clock>().tick;
+    let victims: Vec<Entity> = world
+        .resource::<EventLog>()
+        .events_at(tick)
+        .filter_map(|e| match e {
+            Event::BodyPartWounded { entity, .. } => Some(*entity),
+            _ => None,
+        })
+        .collect();
+
+    let mut newly_terrified: Vec<Entity> = Vec::new();
+    for victim in victims {
+        if let Some(mut fear) = world.get_mut::<Fear>(victim) {
+            let was_terrified = fear.is_terrified();
+            fear.frighten(0.35);
+            if !was_terrified && fear.is_terrified() {
+                newly_terrified.push(victim);
+            }
+        }
+    }
+    for v in newly_terrified {
+        world
+            .resource_mut::<EventLog>()
+            .push(tick, Event::Terrified { entity: v });
     }
 }
 

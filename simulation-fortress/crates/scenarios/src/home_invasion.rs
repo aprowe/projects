@@ -6,7 +6,7 @@
 use fortress_engine::actions::{fill_region_logged, note, spawn_creature};
 use fortress_engine::prelude::*;
 use fortress_engine::{
-    derive_mood, equip_item, execute_tasks, footing_check, retaliation_system,
+    derive_mood, equip_item, execute_tasks, fear_from_combat, footing_check, retaliation_system,
     spawn_humanoid_body, tick_needs, BodySlot, Clock, ElectricalConductivity, Event, EventLog,
     Fear, Goal, Health, Item, ItemName, Kind, Mass, Material, Mood, Position, Pos,
     RetaliateOnAttack, Scenario, Task, TaskQueue, Temperature, Texture, ThermalConductivity,
@@ -175,7 +175,7 @@ impl Scenario for HomeInvasion {
                 execute_tasks,
                 footing_check,
                 retaliation_system,
-                frighten_attacked,
+                fear_from_combat,
             )
                 .chain(),
         );
@@ -307,49 +307,6 @@ fn push_note(world: &mut World, msg: impl Into<String>) {
         .push(tick, Event::Note(msg.into()));
 }
 
-/// Each tick, anyone hit by `BodyPartWounded` gets a fear spike.
-/// Targets that cross the "terrified" threshold get a one-shot note.
-fn frighten_attacked(world: &mut World) {
-    let tick = world.resource::<Clock>().tick;
-    let victims: Vec<Entity> = world
-        .resource::<EventLog>()
-        .events_at(tick)
-        .filter_map(|e| match e {
-            Event::BodyPartWounded { entity, .. } => Some(*entity),
-            _ => None,
-        })
-        .collect();
-
-    let mut newly_terrified: Vec<Entity> = Vec::new();
-    for victim in victims {
-        let crossed = if let Some(mut fear) = world.get_mut::<Fear>(victim) {
-            let was_terrified = fear.is_terrified();
-            fear.frighten(0.35);
-            !was_terrified && fear.is_terrified()
-        } else {
-            false
-        };
-        if crossed {
-            newly_terrified.push(victim);
-        }
-    }
-    for victim in newly_terrified {
-        push_note(
-            world,
-            format!(
-                "{} is wide-eyed with terror.",
-                label_kind(world, victim),
-            ),
-        );
-    }
-}
-
-fn label_kind(world: &World, entity: Entity) -> String {
-    match world.get::<Kind>(entity) {
-        Some(k) => format!("{}#{}", k.0, entity.index()),
-        None => format!("entity#{}", entity.index()),
-    }
-}
 
 fn inside_house(pos: Pos) -> bool {
     pos.z == 0

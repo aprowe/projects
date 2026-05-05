@@ -47,7 +47,9 @@ pub use items::{
     Texture, ThermalConductivity, Wearable, Wearing,
 };
 pub use log::{narrate, Event, EventLog};
-pub use needs::{derive_mood, tick_needs, Energy, Fear, Hunger, Mood};
+pub use needs::{
+    derive_mood, eat_on_use, fear_from_combat, tick_needs, Edible, Energy, Fear, Hunger, Mood,
+};
 pub use pathfind::find_path;
 pub use render::{
     AsciiRenderer, CompositeRenderer, LogRenderer, NullRenderer, Renderer,

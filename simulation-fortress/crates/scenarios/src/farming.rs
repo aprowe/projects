@@ -8,9 +8,9 @@
 use fortress_engine::actions::{fill_region_logged, note, spawn_creature};
 use fortress_engine::prelude::*;
 use fortress_engine::{
-    derive_mood, execute_tasks, spawn_humanoid_body, tick_needs, Clock, Energy, Event, EventLog,
-    Goal, Hunger, Kind, Material, Mood, Position, Pos, Scenario, Task, TaskQueue, Voxel,
-    VoxelWorld,
+    derive_mood, eat_on_use, execute_tasks, spawn_humanoid_body, tick_needs, Clock, Edible,
+    Energy, Event, EventLog, Goal, Hunger, Kind, Material, Mood, Position, Pos, Scenario, Task,
+    TaskQueue, Voxel, VoxelWorld,
 };
 
 const FARMER: &str = "farm";
@@ -32,9 +32,6 @@ pub struct Farmer;
 #[derive(Component)]
 pub struct Crop;
 
-/// Marker for the cabin/larder where farmers go to eat.
-#[derive(Component)]
-pub struct Kitchen;
 
 #[derive(Component, Copy, Clone, Debug)]
 pub struct GrowthStage(pub u8);
@@ -108,12 +105,13 @@ impl Scenario for Farming {
             spawn_humanoid_body(world, entity);
         }
 
-        // A larder by the front gate. Eating here resets hunger to 0.
+        // A larder by the front gate. Generic Edible: any creature
+        // who Use's it sates their Hunger.
         let kitchen_pos = Pos::new(0, 6, 0);
         world.spawn((
-            Kitchen,
             Kind("larder".into()),
             Position(kitchen_pos),
+            Edible::meal(),
         ));
         note(world, "A larder sits by the gate, stocked for the day's work.");
         note(world, "The farmers stretch and look out across the field.");
@@ -128,7 +126,8 @@ impl Scenario for Farming {
                 farmer_planner,
                 execute_tasks,
                 advance_used_crops,
-                consume_at_kitchen,
+                eat_on_use,
+                narrate_meals,
             )
                 .chain(),
         );
@@ -147,7 +146,7 @@ impl Scenario for Farming {
 /// - else idle.
 fn farmer_planner(world: &mut World) {
     let kitchen: Option<(Entity, Pos)> = {
-        let mut q = world.query_filtered::<(Entity, &Position), With<Kitchen>>();
+        let mut q = world.query_filtered::<(Entity, &Position), With<Edible>>();
         q.iter(world).map(|(e, p)| (e, p.0)).next()
     };
 
@@ -252,11 +251,12 @@ fn farmer_planner(world: &mut World) {
     }
 }
 
-/// React to `EntityUsed` events targeting a `Kitchen` entity by
-/// resetting the user's hunger.
-fn consume_at_kitchen(world: &mut World) {
+/// Scenario-flavored narration for meals. The engine's `eat_on_use`
+/// already handled the hunger drop; this just adds a "hurried meal"
+/// note when an `Edible` entity gets used.
+fn narrate_meals(world: &mut World) {
     let tick = world.resource::<Clock>().tick;
-    let used: Vec<(Entity, Entity)> = world
+    let pairs: Vec<(Entity, Entity)> = world
         .resource::<EventLog>()
         .events_at(tick)
         .filter_map(|e| match e {
@@ -265,12 +265,9 @@ fn consume_at_kitchen(world: &mut World) {
         })
         .collect();
 
-    for (user, target) in used {
-        if world.get::<Kitchen>(target).is_none() {
+    for (user, target) in pairs {
+        if world.get::<Edible>(target).is_none() {
             continue;
-        }
-        if let Some(mut h) = world.get_mut::<Hunger>(user) {
-            h.feed(1.0);
         }
         push_note(
             world,
