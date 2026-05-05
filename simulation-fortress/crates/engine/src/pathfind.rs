@@ -1,14 +1,17 @@
 //! A* pathfinding over the voxel world.
 //!
-//! Operates on a single Z-level for now (vertical moves require ramps
-//! which the search does not yet traverse). 8-connected neighborhoods
-//! with diagonal corner-cutting forbidden: a diagonal step requires
-//! both flanking cardinal neighbors to also be walkable.
+//! 8-connected neighborhoods on the horizontal plane with diagonal
+//! corner-cutting forbidden: a diagonal step requires both flanking
+//! cardinal neighbors to also be walkable. Vertical motion happens
+//! through `RampUp` voxels — standing on a ramp at z lets you step
+//! up to z+1, and standing on a tile whose floor-below is a ramp
+//! lets you step down. Each Z transition costs the same as a
+//! cardinal step.
 
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap};
 
-use crate::world::{Pos, VoxelWorld};
+use crate::world::{Pos, TileKind, VoxelWorld};
 
 const NEIGHBORS_2D: &[(i32, i32)] = &[
     (-1, -1), (0, -1), (1, -1),
@@ -105,6 +108,35 @@ pub fn find_path(world: &VoxelWorld, start: Pos, goal: Pos, max_iter: usize) -> 
                 }));
             }
         }
+
+        // Vertical neighbors via ramps.
+        for dz in [-1, 1] {
+            let next = Pos::new(current.x, current.y, current.z + dz);
+            if !world.is_walkable(next) {
+                continue;
+            }
+            // Going up: current tile must BE a ramp.
+            // Going down: target tile must be a ramp.
+            let allowed = match dz {
+                1 => world.voxel(current).kind == TileKind::RampUp,
+                -1 => world.voxel(next).kind == TileKind::RampUp,
+                _ => false,
+            };
+            if !allowed {
+                continue;
+            }
+            let tentative_g = g + STEP_CARDINAL;
+            if tentative_g < *g_score.get(&next).unwrap_or(&u32::MAX) {
+                g_score.insert(next, tentative_g);
+                came_from.insert(next, current);
+                let f = tentative_g + heuristic(next, goal);
+                open.push(Reverse(Node {
+                    f,
+                    g: tentative_g,
+                    pos: next,
+                }));
+            }
+        }
     }
 
     None
@@ -123,9 +155,10 @@ fn reconstruct(came_from: &HashMap<Pos, Pos>, mut current: Pos) -> Vec<Pos> {
 fn heuristic(a: Pos, b: Pos) -> u32 {
     let dx = (a.x - b.x).unsigned_abs();
     let dy = (a.y - b.y).unsigned_abs();
+    let dz = (a.z - b.z).unsigned_abs();
     let min = dx.min(dy);
     let max = dx.max(dy);
-    STEP_DIAGONAL * min + STEP_CARDINAL * (max - min)
+    STEP_DIAGONAL * min + STEP_CARDINAL * (max - min) + STEP_CARDINAL * dz
 }
 
 #[cfg(test)]
@@ -202,6 +235,26 @@ mod tests {
         world.set_voxel(Pos::new(0, 0, 0), Voxel::floor(stone));
         let path = find_path(&world, Pos::new(0, 0, 0), Pos::new(5, 5, 0), 1024);
         assert!(path.is_none());
+    }
+
+    #[test]
+    fn climbs_a_ramp_to_the_floor_above() {
+        let mut world = VoxelWorld::new();
+        let stone = stone(&mut world);
+        // 3x1 floor at z=0
+        for x in 0..3 {
+            world.set_voxel(Pos::new(x, 0, 0), Voxel::floor(stone));
+        }
+        // Ramp at (2, 0, 0) connects to z=1
+        world.set_voxel(Pos::new(2, 0, 0), Voxel::ramp(stone));
+        // Floor at z=1 from x=2..5
+        for x in 2..5 {
+            world.set_voxel(Pos::new(x, 0, 1), Voxel::floor(stone));
+        }
+        let path = find_path(&world, Pos::new(0, 0, 0), Pos::new(4, 0, 1), 1024).unwrap();
+        assert_eq!(path.first(), Some(&Pos::new(0, 0, 0)));
+        assert_eq!(path.last(), Some(&Pos::new(4, 0, 1)));
+        assert!(path.contains(&Pos::new(2, 0, 0)), "path must use ramp: {:?}", path);
     }
 
     #[test]

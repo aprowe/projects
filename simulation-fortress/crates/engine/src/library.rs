@@ -548,9 +548,35 @@ pub fn spawn_furniture_template(
     // Optionally stamp wall voxels for the whole footprint so paths
     // route around the sofa instead of over it. Outdoor + decor +
     // floor-coverings + lighting + wall art don't block. Open
-    // windows / sliding doors don't block either.
+    // windows / sliding doors don't block either. Staircases get
+    // special treatment — RampUp at z and Empty above (so an actor
+    // can climb).
     let window_open = matches!(&template.window, Some(w) if !w.closed);
-    if template.kind.blocks_tile() && !window_open {
+    let is_staircase = matches!(template_name, "staircase up" | "staircase down");
+    if is_staircase {
+        if let Some(mat) = material_id {
+            let mut vw = world.resource_mut::<VoxelWorld>();
+            let ramp = crate::world::Voxel::ramp(mat);
+            for dx in 0..w {
+                for dy in 0..d {
+                    let tile = crate::world::Pos::new(
+                        anchor_pos.x + dx,
+                        anchor_pos.y + dy,
+                        anchor_pos.z,
+                    );
+                    vw.set_voxel(tile, ramp);
+                    // Air above so the actor can stand on top of the
+                    // ramp at z+1 — supported by the RampUp.
+                    let above = crate::world::Pos::new(
+                        anchor_pos.x + dx,
+                        anchor_pos.y + dy,
+                        anchor_pos.z + 1,
+                    );
+                    vw.set_voxel(above, crate::world::Voxel::empty());
+                }
+            }
+        }
+    } else if template.kind.blocks_tile() && !window_open {
         if let Some(mat) = material_id {
             let mut vw = world.resource_mut::<VoxelWorld>();
             let voxel = crate::world::Voxel::wall(mat);

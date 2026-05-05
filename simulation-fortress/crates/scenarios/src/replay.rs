@@ -14,14 +14,26 @@ use fortress_engine::{narrate, AsciiRenderer, EventLog, Renderer, Tick};
 use serde::Serialize;
 
 #[derive(Serialize)]
+struct ZSlice {
+    z: i32,
+    ascii: String,
+}
+
+#[derive(Serialize)]
 struct Frame {
     tick: u64,
-    ascii: String,
+    /// One entry per Z-level captured. Single-floor scenarios
+    /// produce a single slice; multi-story scenarios produce one
+    /// slice per floor and the viewer exposes a Z scrubber.
+    slices: Vec<ZSlice>,
     narration: Vec<String>,
 }
 
 pub struct ReplayRenderer {
     inner: AsciiRenderer,
+    /// Z-levels to capture each frame. Defaults to `[inner.z]` so
+    /// single-floor scenarios behave exactly as before.
+    z_slices: Vec<i32>,
     frames: Vec<Frame>,
     output_path: PathBuf,
     title: String,
@@ -29,12 +41,25 @@ pub struct ReplayRenderer {
 
 impl ReplayRenderer {
     pub fn new(inner: AsciiRenderer, output_path: PathBuf, title: impl Into<String>) -> Self {
+        let z = inner.z;
         Self {
             inner,
+            z_slices: vec![z],
             frames: Vec::new(),
             output_path,
             title: title.into(),
         }
+    }
+
+    /// Capture multiple Z-levels per frame. Each call replaces the
+    /// existing list. Z-levels render top-down in the viewer (the
+    /// last entry shows first).
+    pub fn with_z_slices(mut self, slices: impl IntoIterator<Item = i32>) -> Self {
+        self.z_slices = slices.into_iter().collect();
+        if self.z_slices.is_empty() {
+            self.z_slices.push(self.inner.z);
+        }
+        self
     }
 
     /// Write the buffered frames as a self-contained HTML file. Call
@@ -55,10 +80,21 @@ impl ReplayRenderer {
 
 impl Renderer for ReplayRenderer {
     fn frame(&mut self, world: &mut World, tick: Tick) {
-        let ascii = match self.inner.frame_to_html(world, tick) {
-            Some(s) => s,
-            None => return,
-        };
+        let mut slices: Vec<ZSlice> = Vec::with_capacity(self.z_slices.len());
+        let original_z = self.inner.z;
+        let z_levels = self.z_slices.clone();
+        let mut any_rendered = false;
+        for z in z_levels {
+            self.inner.z = z;
+            if let Some(ascii) = self.inner.frame_to_html(world, tick) {
+                slices.push(ZSlice { z, ascii });
+                any_rendered = true;
+            }
+        }
+        self.inner.z = original_z;
+        if !any_rendered {
+            return;
+        }
         let narration: Vec<String> = {
             let log = world.resource::<EventLog>();
             let events = log
@@ -73,7 +109,7 @@ impl Renderer for ReplayRenderer {
         };
         self.frames.push(Frame {
             tick,
-            ascii,
+            slices,
             narration,
         });
     }
@@ -237,6 +273,10 @@ main {
         <option value="80">12×</option>
       </select>
     </span>
+    <span class="zlevel" id="zwrap" style="display:none">
+      <label for="zsel">floor</label>
+      <select id="zsel"></select>
+    </span>
   </div>
 </main>
 <script>
@@ -255,12 +295,33 @@ const speedSel = $("speed");
 let idx = 0;
 let timer = null;
 let playing = false;
+let zIdx = 0;
+
+const zsel = $("zsel");
+const zwrap = $("zwrap");
 
 function render() {
   const f = FRAMES[idx];
   if (!f) return;
+  // Pick a slice. Multi-floor frames carry `slices`; legacy frames
+  // would carry a single `ascii` string.
+  const slices = f.slices || (f.ascii ? [{z: 0, ascii: f.ascii}] : []);
+  if (slices.length > 1 && zsel.options.length !== slices.length) {
+    zsel.replaceChildren();
+    slices.forEach((s, i) => {
+      const opt = document.createElement("option");
+      opt.value = String(i);
+      opt.textContent = `z=${s.z}`;
+      zsel.appendChild(opt);
+    });
+    zwrap.style.display = "inline-flex";
+  } else if (slices.length <= 1) {
+    zwrap.style.display = "none";
+  }
+  if (zIdx >= slices.length) zIdx = 0;
+  zsel.value = String(zIdx);
   tickline.textContent = `tick ${f.tick}  (frame ${idx + 1}/${FRAMES.length})`;
-  asciiEl.innerHTML = f.ascii;
+  asciiEl.innerHTML = slices[zIdx] ? slices[zIdx].ascii : "";
   if (f.narration && f.narration.length > 0) {
     const ul = document.createElement("ul");
     f.narration.forEach(s => {
@@ -314,6 +375,10 @@ scrub.addEventListener("input", (e) => {
 });
 speedSel.addEventListener("change", () => {
   if (playing) { pause(); play(); }
+});
+zsel.addEventListener("change", (e) => {
+  zIdx = parseInt(e.target.value, 10);
+  render();
 });
 document.addEventListener("keydown", (e) => {
   if (e.key === " " || e.key === "Enter") { e.preventDefault(); playing ? pause() : play(); }

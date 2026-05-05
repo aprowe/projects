@@ -170,9 +170,10 @@ fn main() {
             ] {
                 ascii = ascii.entity_kind(kind, 'T');
             }
-            run_with_optional_replay(
+            run_with_optional_replay_zs(
                 &mut sim, &mut scenario, options, ascii, repl,
                 replay_html_path.clone(), "mansion home invasion",
+                &[0, 1],
             )
         }
         "airport" => {
@@ -214,9 +215,25 @@ fn run_with_optional_replay<S: Scenario>(
     replay_path: Option<std::path::PathBuf>,
     title: &str,
 ) -> u64 {
+    run_with_optional_replay_zs(sim, scenario, options, ascii, repl, replay_path, title, &[])
+}
+
+fn run_with_optional_replay_zs<S: Scenario>(
+    sim: &mut Simulation,
+    scenario: &mut S,
+    options: RunOptions,
+    ascii: AsciiRenderer,
+    repl: bool,
+    replay_path: Option<std::path::PathBuf>,
+    title: &str,
+    z_slices: &[i32],
+) -> u64 {
     let log = LogRenderer::default();
     let t = if let Some(path) = replay_path {
         let mut replay = ReplayRenderer::new(ascii.clone(), path.clone(), title);
+        if !z_slices.is_empty() {
+            replay = replay.with_z_slices(z_slices.iter().copied());
+        }
         let mut renderer = CompositeRenderer(CompositeRenderer(log, ascii), &mut replay);
         let t = drive(sim, scenario, options, &mut renderer, repl);
         if let Err(e) = replay.flush_html() {

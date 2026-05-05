@@ -71,6 +71,16 @@ const DIV_SOUTH_Y: i32 = 25; // line between middle and back rooms
 const WEST_WING_X: i32 = 18;  // dining/kitchen wing east edge
 const EAST_WING_X: i32 = 41;  // master/kids wing west edge
 
+// ─── upstairs (z=1) ────────────────────────────────────────────────
+// Smaller footprint: just the central rooms above the foyer.
+const UP_X_MIN: i32 = 19;
+const UP_X_MAX: i32 = 40;
+const UP_Y_MIN: i32 = HOUSE_Y_MIN;
+const UP_Y_MAX: i32 = 24;
+const UP_DIVIDER_Y: i32 = 16;            // splits north / south upstairs rooms
+const STAIR_FOOT: Pos = Pos::new(28, 13, 0); // bottom of grand staircase
+const UP_STUDY_DOOR: Pos = Pos::new(29, UP_DIVIDER_Y, 1);
+
 // ─── doors ──────────────────────────────────────────────────────────
 const DINING_DOOR: Pos = Pos::new(WEST_WING_X, 11, 0);
 const KITCHEN_DOOR: Pos = Pos::new(WEST_WING_X, 20, 0);
@@ -305,11 +315,49 @@ impl Scenario for MansionInvasion {
 
             // Foyer side walls — keep narrow corridor through to living
             // (actually foyer opens directly into living through 14-y line)
+
+            // ─── upstairs (z = 1) ───────────────────────────────────
+            // Floor over the central rooms.
+            let upstairs_carpet = vw.material_id("carpet").unwrap_or(0);
+            let upstairs_wood = vw.material_id("hardwood_floor").unwrap_or(0);
+            for y in UP_Y_MIN..=UP_Y_MAX {
+                for x in UP_X_MIN..=UP_X_MAX {
+                    // South of the divider = wood (upstairs hall + study);
+                    // North = bedrooms in carpet.
+                    let mat = if y >= UP_DIVIDER_Y { upstairs_wood } else { upstairs_carpet };
+                    vw.set_voxel(Pos::new(x, y, 1), Voxel::floor(mat));
+                }
+            }
+            // Outer walls (brick).
+            let up_outer = Voxel::wall(brick);
+            for x in (UP_X_MIN - 1)..=(UP_X_MAX + 1) {
+                vw.set_voxel(Pos::new(x, UP_Y_MIN - 1, 1), up_outer);
+                vw.set_voxel(Pos::new(x, UP_Y_MAX + 1, 1), up_outer);
+            }
+            for y in UP_Y_MIN..=UP_Y_MAX {
+                vw.set_voxel(Pos::new(UP_X_MIN - 1, y, 1), up_outer);
+                vw.set_voxel(Pos::new(UP_X_MAX + 1, y, 1), up_outer);
+            }
+            // Inner divider at y=UP_DIVIDER_Y, with a doorway gap.
+            for x in UP_X_MIN..=UP_X_MAX {
+                let p = Pos::new(x, UP_DIVIDER_Y, 1);
+                if p != UP_STUDY_DOOR {
+                    vw.set_voxel(p, Voxel::wall(drywall));
+                }
+            }
+            // Vertical wall splitting the two upstairs bedrooms at x=29.
+            for y in UP_Y_MIN..(UP_DIVIDER_Y) {
+                let p = Pos::new(29, y, 1);
+                vw.set_voxel(p, Voxel::wall(drywall));
+            }
+            // Doorways from the upstairs hallway into each bedroom.
+            vw.set_voxel(Pos::new(24, UP_DIVIDER_Y - 1, 1), Voxel::floor(upstairs_carpet));
+            vw.set_voxel(Pos::new(34, UP_DIVIDER_Y - 1, 1), Voxel::floor(upstairs_carpet));
         }
 
         note(
             world,
-            "An estate at the end of a long driveway. A two-story brick mansion, lights on in the kitchen and family room, soft music drifting through the open back door.",
+            "An estate at the end of a long driveway. A two-story brick mansion: lights on in the kitchen and family room, soft music drifting through the open back door, and a single light in an upstairs bedroom.",
         );
 
         // ─── doors ──────────────────────────────────────────────────
@@ -363,6 +411,10 @@ impl Scenario for MansionInvasion {
 
         // ─── foyer ──────────────────────────────────────────────────
         place(world, "chandelier", Pos::new(29, 10, 0));
+        // Grand staircase — anchor at z=0 stamps a RampUp; the
+        // matching tile at z=1 becomes Empty so an actor can land
+        // there and walk into the upstairs hall.
+        place(world, "staircase up", STAIR_FOOT);
         place(world, "bench",      Pos::new(22, 9, 0));
         place(world, "side table", Pos::new(36, 9, 0));
         place(world, "vase",       Pos::new(36, 8, 0));
@@ -527,6 +579,35 @@ impl Scenario for MansionInvasion {
         place(world, "dresser",     Pos::new(15, 36, 0));
         place_painting(world, "painting", Pos::new(11, 32, 0));
 
+        // ─── upstairs (z = 1) — two bedrooms + landing ────────────
+        // West bedroom (x=20..28, y=7..15)
+        place(world, "queen bed",   Pos::new(22, 8, 1));
+        place_container(world, "nightstand", Pos::new(25, 8, 1),
+            &["leather wallet", "diamond stud earrings"]);
+        place(world, "table lamp",  Pos::new(25, 9, 1));
+        place_container(world, "wardrobe", Pos::new(20, 13, 1),
+            &["silk dress", "vintage handbag"]);
+        place(world, "ceiling fan", Pos::new(24, 11, 1));
+        place_painting(world, "oil portrait", Pos::new(27, 8, 1));
+
+        // East bedroom (x=30..40, y=7..15) — TEEN moves up here
+        place(world, "twin bed",    Pos::new(32, 8, 1));
+        place(world, "twin bed",    Pos::new(36, 8, 1));
+        place_container(world, "nightstand", Pos::new(34, 9, 1),
+            &["earphones", "phone"]);
+        place(world, "desk",        Pos::new(38, 11, 1));
+        place_container(world, "dresser", Pos::new(30, 14, 1),
+            &["concert tickets", "pocket cash"]);
+        place_painting(world, "abstract canvas", Pos::new(38, 8, 1));
+        place_powered(world, "tv set", Pos::new(35, 14, 1), "upstairs TV (cartoons)");
+
+        // Upstairs landing / hallway
+        place(world, "table lamp",  Pos::new(29, 18, 1));
+        place(world, "side table",  Pos::new(29, 17, 1));
+        place(world, "potted plant", Pos::new(20, 23, 1));
+        place(world, "potted plant", Pos::new(40, 23, 1));
+        place_painting(world, "oil portrait", Pos::new(29, 24, 1));
+
         // ─── exterior dressing ──────────────────────────────────────
         place(world, "mailbox",       Pos::new(33, 0, 0));
         place(world, "garden gnome",  Pos::new(5, 5, 0));
@@ -557,7 +638,7 @@ impl Scenario for MansionInvasion {
         world.entity_mut(mother).insert(Family).insert(RetaliateOnAttack);
         equip(world, mother, &["wool shirt", "leather boots", "kitchen knife"]);
 
-        let teen = humanoid(world, "teen", Pos::new(54, 33, 0), FAMILY, 60,
+        let teen = humanoid(world, "teen", Pos::new(34, 9, 1), FAMILY, 60,
             Stats { str_: 10, dex: 14, con: 11, int: 12, wis: 9, cha: 12 });
         world.entity_mut(teen).insert(Family).insert(RetaliateOnAttack);
         equip(world, teen, &["hoodie", "rubber boots", "baseball bat"]);
