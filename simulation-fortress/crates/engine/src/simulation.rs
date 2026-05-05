@@ -4,6 +4,7 @@ use bevy_ecs::prelude::World;
 
 use crate::log::EventLog;
 use crate::render::{NullRenderer, Renderer};
+use crate::rng::Rng;
 use crate::scenario::Scenario;
 use crate::time::{Clock, Tick};
 use crate::world::VoxelWorld;
@@ -18,6 +19,8 @@ pub struct RunOptions {
     /// If `Some`, sleep this long after each rendered frame so the
     /// simulation plays back at human-readable speed.
     pub pacing: Option<Duration>,
+    /// Seed for the engine RNG resource. Same seed -> same run.
+    pub rng_seed: u64,
 }
 
 impl RunOptions {
@@ -25,6 +28,7 @@ impl RunOptions {
         Self {
             max_ticks,
             pacing: None,
+            ..Self::default()
         }
     }
 
@@ -32,7 +36,13 @@ impl RunOptions {
         Self {
             max_ticks,
             pacing: Some(pacing),
+            ..Self::default()
         }
+    }
+
+    pub fn with_seed(mut self, seed: u64) -> Self {
+        self.rng_seed = seed;
+        self
     }
 }
 
@@ -41,6 +51,7 @@ impl Default for RunOptions {
         Self {
             max_ticks: 1_000,
             pacing: Some(Duration::from_millis(500)),
+            rng_seed: 0xCAFE_BABE_DEAD_BEEF,
         }
     }
 }
@@ -76,6 +87,7 @@ impl Simulation {
         S: Scenario,
         R: Renderer,
     {
+        self.world.insert_resource(Rng::from_seed(options.rng_seed));
         scenario.setup(&mut self.world);
         let mut schedule = scenario.build_schedule();
         renderer.frame(&mut self.world, 0);

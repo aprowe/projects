@@ -123,18 +123,41 @@ Adding new aspects of a creature is just a new `Component`:
 - Species → `Species(SpeciesId)` for shared traits across many
   individuals.
 
-## 5. Anatomy & wounds — planned
+## 5. Anatomy & wounds — partial
 
-DF tracks body parts, layers (skin, fat, muscle, bone), and per-part
-wounds. We probably want something similar but simpler.
+Body parts are ECS entities, not nested data. Each humanoid creature
+gets ~22 body-part entities tagged with `BodyPart`, a `BodyPartKind`
+(Head, LeftEye, RightEar, Torso, Heart, LeftHand, RightLeg, …), a
+`PartOf(Entity)` backlink to the creature, a `PartHealth { current,
+max, status }`, and a `HitWeight(u32)` used for weighted random
+combat targeting.
+
+`PartStatus` covers Intact, Bruised, Cut, Broken, Crushed, Severed,
+each with a `capacity()` factor. Functions are looked up by
+`part_functions(kind)` and aggregated into per-creature capacities
+via `function_capacity(world, creature, function)`. Recognised
+functions today: Vision, Hearing, Smell, Speech, Grasp, Mobility,
+Vitality, Breathing. Two intact ears = hearing 2.0; one crushed,
+one intact = hearing 1.0; both gone = hearing 0.0.
+
+`spawn_humanoid_body(world, creature)` creates the standard layout.
+Internal organs (Heart, Lungs, Stomach, Tongue) have hit weight 0 —
+they aren't directly targeted by external blows; reaching them
+requires either targeted strikes (future) or cascading from severe
+torso/head damage (future).
+
+Code: `crates/engine/src/anatomy.rs`
 
 Open questions:
 
-- Tree of body parts vs. flat list with parent links?
-- Wound types: bruise, cut, fracture, burn, infection — how do they
-  interact?
-- Bleeding as a tick-driven status effect that depletes health?
+- Layered materials (skin / fat / muscle / bone) — extra components
+  per part, or sub-entities?
+- Bleeding as a tick-driven status effect that depletes aggregate
+  Health?
+- Cascading damage: a destroyed Torso should imperil Heart and Lungs.
 - Prosthetics, regrowth, scarring — scenario-toggleable?
+- Non-humanoid layouts (quadrupeds, multi-headed beasts) — currently
+  only `spawn_humanoid_body` exists.
 
 ## 6. Personality — planned
 
@@ -272,20 +295,49 @@ Wants to grow into:
 - Coalition logic for multi-faction scenarios (D-Day: Allies vs Axis,
   but also French civilians as a third party).
 
-## 13. Combat — planned
+## 13. Combat — partial
 
-Resolves damage when one entity attacks another. Today the home
-invasion scenario hard-codes `health -= 25`. We want a generic system
-that uses anatomy + items + skills.
+`resolve_attack(world, attacker, target)` is the generic blow:
 
-Open questions:
+1. Inspect the attacker's `MainHand` slot. If a weapon is held, read
+   its `Mass` and `Texture`; otherwise model a fist (mass 0.5,
+   texture Soft).
+2. Compute damage: `mass * 10` rounded, scaled by a texture
+   modifier (Sharp 1.5, Polished/Smooth 1.0, Rough/Coarse/Bumpy 0.9,
+   Sticky/Slick 0.7, Soft/Furry 0.5).
+3. Pick a body part on the target by weighted random over `HitWeight`
+   among non-destroyed parts (using the seeded `Rng` resource).
+4. Apply damage to the chosen part's `PartHealth`. The new
+   `PartStatus` follows from how much HP is left and whether the
+   weapon is sharp: full → Intact → Bruised → Broken/Cut → Crushed
+   /Severed.
+5. Apply half the damage to the creature's aggregate `Health`.
+6. If a critical part (Heart, Head, Neck) is destroyed, drop
+   aggregate Health to 0.
+7. Emit `BodyPartWounded`, optionally `BodyPartDestroyed`, then
+   `EntityAttacked`, and `EntityKilled` if the creature is no longer
+   alive.
 
-- Hit-roll vs. always-hit-but-damage-varies.
-- Armor as layered materials over body parts.
-- Ranged weapons: ballistics simulated (line of sight + travel time)
-  or abstract.
-- Morale and retreat.
-- Non-lethal options (subdue, intimidate, surrender).
+Code: `crates/engine/src/combat.rs`,
+`crates/engine/src/rng.rs`
+
+Demonstrated in the home invasion: residents' fists (0.5 kg, Soft)
+chip away at the intruder's small body parts — both his ears get
+crushed in a typical run, dropping his hearing capacity to 0.0 while
+he still wins the fight. The crowbar (2.5 kg, Polished) crushes
+larger parts but never severs (not Sharp).
+
+Still open:
+
+- Hit-roll & dodge — currently every blow lands.
+- Armor: layered materials between weapon and body part should
+  absorb damage based on weapon texture (Sharp vs. Blunt) and the
+  armor's thermal/elastic properties (already on items).
+- Ranged weapons: ballistics simulated (line of sight + travel
+  time) vs. abstract.
+- Morale, retreat, surrender.
+- Skill-based modifiers (§10).
+- Cascading damage to internal organs from severe external hits.
 
 ## 14. Pathfinding & navigation — partial
 
@@ -395,11 +447,21 @@ dependency-free. Likely candidates:
   panels for entity inspection.
 - `render-graphical`: bevy/wgpu voxel view for debugging in 3D.
 
-## 19. Determinism & RNG — planned
+## 19. Determinism & RNG — partial
 
-Many systems above need randomness (combat rolls, world gen, AI
-decisions). We want all of it routed through a seeded RNG carried by
-the simulation so any run can be replayed.
+A seeded `Rng` resource (splitmix64) lives on the simulation world.
+The seed comes from `RunOptions::rng_seed` (default 0xCAFE_BABE_DEAD_BEEF);
+same seed produces the same run, including combat hit-part picks.
+
+Code: `crates/engine/src/rng.rs`
+
+Still open:
+
+- Route worldgen, AI decisions, and weather through this RNG once
+  those systems exist.
+- Per-entity RNG streams so adding a new system doesn't shift every
+  earlier roll.
+- Replay: rebuild final state from `rng_seed` + scenario inputs alone.
 
 ## 20. Configuration & scripting — planned
 
@@ -410,22 +472,21 @@ Defer until we know what real scenarios need.
 
 ## How systems compose — example: home invasion
 
-The current home-invasion scenario exercises §1, §2, §4, §9, §12,
-§14, §17, §18. To make it richer we'd pull in:
+The current home-invasion scenario exercises §1, §2, §4, §5, §9,
+§12, §13, §14, §17, §18, §19. To make it richer we'd pull in:
 
-- §5 (anatomy): the intruder breaks a resident's arm before killing
-  them; injured residents fight worse.
 - §6 (personality): one resident is a coward and tries to hide; one
   is brave and charges.
-- §10 (skills): firearms skill on a homeowner with a pistol.
+- §10 (skills): firearms skill on a homeowner with a pistol; a
+  brawler resident throws better punches.
 - §11 (needs): if the simulation ran long enough, residents would
   also need to eat and sleep — usually irrelevant to a 5-minute
   invasion.
-- §13 (combat): replace the hard-coded damage with resolution that
-  factors in held weapon mass + texture (already on the crowbar)
-  versus worn armor's thermal/elastic properties.
-- §17 (events): every blow, scream, and death already emits an event;
-  next step is to flash overlays on the renderer.
+- §13 (combat): add armor absorption from worn clothing's thermal /
+  texture properties (already on items), plus dodge rolls based on
+  current Mobility capacity.
+- §15 (weather): a stormy night reduces visibility, biasing the
+  intruder toward riskier paths.
 
 That layering is the point: each new system adds depth across every
 scenario without rewriting them.

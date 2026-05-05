@@ -6,9 +6,10 @@
 use fortress_engine::actions::{fill_region_logged, note, spawn_creature};
 use fortress_engine::prelude::*;
 use fortress_engine::{
-    equip_item, find_path, BodySlot, Clock, ElectricalConductivity, Event, EventLog, Health, Item,
-    ItemName, Kind, Mass, Material, Position, Pos, Scenario, Temperature, Texture,
-    ThermalConductivity, Voxel, VoxelWorld, Wearable,
+    equip_item, find_path, resolve_attack, spawn_humanoid_body, BodySlot, Clock,
+    ElectricalConductivity, Event, EventLog, Health, Item, ItemName, Kind, Mass, Material,
+    Position, Pos, Scenario, Temperature, Texture, ThermalConductivity, Voxel, VoxelWorld,
+    Wearable,
 };
 
 const FAMILY: &str = "family";
@@ -97,6 +98,7 @@ impl Scenario for HomeInvasion {
                 Some(FAMILY),
             );
             world.entity_mut(entity).insert(Family);
+            spawn_humanoid_body(world, entity);
 
             let shirt = spawn_wool_shirt(world);
             equip_item(world, entity, shirt);
@@ -107,6 +109,7 @@ impl Scenario for HomeInvasion {
 
         let intruder = spawn_creature(world, "intruder", Pos::new(4, -3, 0), 120, Some(INTRUDER));
         world.entity_mut(intruder).insert(Intruder);
+        spawn_humanoid_body(world, intruder);
 
         let crowbar = spawn_crowbar(world);
         equip_item(world, intruder, crowbar);
@@ -142,51 +145,42 @@ impl Scenario for HomeInvasion {
 }
 
 /// Per-tick AI for the intruder: re-plan to the nearest living family
-/// member, attack if adjacent, otherwise step along the path.
-#[allow(clippy::type_complexity)]
-fn intruder_behavior(
-    voxel_world: Res<VoxelWorld>,
-    clock: Res<Clock>,
-    mut log: ResMut<EventLog>,
-    mut intruders: Query<(Entity, &Kind, &mut Position, &mut Health), With<Intruder>>,
-    mut family: Query<
-        (Entity, &Kind, &Position, &mut Health),
-        (With<Family>, Without<Intruder>),
-    >,
-) {
-    let tick = clock.tick;
-
-    let Ok((intruder_entity, _intruder_kind, mut intruder_pos, mut intruder_hp)) =
-        intruders.single_mut()
-    else {
-        return;
+/// member, attack if adjacent, otherwise step along the path. Runs as
+/// an exclusive system so it can call `resolve_attack`.
+fn intruder_behavior(world: &mut World) {
+    let intruder = match find_intruder(world) {
+        Some(e) => e,
+        None => return,
     };
-    if !intruder_hp.is_alive() {
+    if world
+        .get::<Health>(intruder)
+        .map(|h| !h.is_alive())
+        .unwrap_or(true)
+    {
         return;
     }
 
-    let target = family
-        .iter()
-        .filter(|(_, _, _, h)| h.is_alive())
-        .min_by_key(|(_, _, p, _)| intruder_pos.0.manhattan(p.0))
-        .map(|(e, k, p, _)| (e, k.0.clone(), p.0));
-
+    let intruder_pos = world.get::<Position>(intruder).map(|p| p.0).unwrap();
+    let target = nearest_living_family(world, intruder_pos);
     let Some((target_entity, target_kind, target_pos)) = target else {
-        log.push(
-            tick,
-            Event::Note("The intruder pauses, breath ragged; no one alive remains to threaten.".into()),
+        push_note(
+            world,
+            "The intruder pauses, breath ragged; no one alive remains to threaten.",
         );
         return;
     };
 
-    let path = find_path(&voxel_world, intruder_pos.0, target_pos, 4096);
+    let path = {
+        let vw = world.resource::<VoxelWorld>();
+        find_path(vw, intruder_pos, target_pos, 4096)
+    };
     let Some(path) = path else {
-        log.push(
-            tick,
-            Event::Note(format!(
+        push_note(
+            world,
+            format!(
                 "The intruder peers about but can't find a path to {target_kind}#{}.",
                 target_entity.index()
-            )),
+            ),
         );
         return;
     };
@@ -196,82 +190,72 @@ fn intruder_behavior(
 
     let next = path[1];
     if next == target_pos {
-        log.push(
-            tick,
-            Event::Note(format!(
-                "The intruder closes the gap on {target_kind}#{} and swings the crowbar.",
+        push_note(
+            world,
+            format!(
+                "The intruder closes the gap on {target_kind}#{} and swings.",
                 target_entity.index()
-            )),
+            ),
         );
-        // Hit the family member.
-        if let Ok((_, _, _, mut target_hp)) = family.get_mut(target_entity) {
-            target_hp.current -= 25;
-            log.push(
-                tick,
-                Event::EntityAttacked {
-                    attacker: Some(intruder_entity),
-                    target: target_entity,
-                    damage: 25,
-                    remaining_health: target_hp.current,
-                },
+        resolve_attack(world, intruder, target_entity);
+        // The target swings back if still alive.
+        let target_alive = world
+            .get::<Health>(target_entity)
+            .map(|h| h.is_alive())
+            .unwrap_or(false);
+        if target_alive {
+            push_note(
+                world,
+                format!(
+                    "{target_kind}#{} flails back, fists swinging.",
+                    target_entity.index()
+                ),
             );
-            if !target_hp.is_alive() {
-                log.push(
-                    tick,
-                    Event::EntityKilled {
-                        entity: target_entity,
-                        by: Some(intruder_entity),
-                    },
-                );
-            }
-        }
-        // Family fights back a little.
-        log.push(
-            tick,
-            Event::Note(format!(
-                "{target_kind}#{} fights back desperately, landing a few blows in return.",
-                target_entity.index()
-            )),
-        );
-        intruder_hp.current -= 5;
-        log.push(
-            tick,
-            Event::EntityAttacked {
-                attacker: Some(target_entity),
-                target: intruder_entity,
-                damage: 5,
-                remaining_health: intruder_hp.current,
-            },
-        );
-        if !intruder_hp.is_alive() {
-            log.push(
-                tick,
-                Event::EntityKilled {
-                    entity: intruder_entity,
-                    by: Some(target_entity),
-                },
-            );
+            resolve_attack(world, target_entity, intruder);
         }
     } else {
-        let was_outside = !inside_house(intruder_pos.0);
+        let was_outside = !inside_house(intruder_pos);
         let now_inside = inside_house(next);
         if was_outside && now_inside {
-            log.push(
-                tick,
-                Event::Note("The intruder ducks through the doorway and into the cabin.".into()),
+            push_note(
+                world,
+                "The intruder ducks through the doorway and into the cabin.",
             );
         }
-        let from = intruder_pos.0;
-        intruder_pos.0 = next;
-        log.push(
+        if let Some(mut p) = world.get_mut::<Position>(intruder) {
+            p.0 = next;
+        }
+        let tick = world.resource::<Clock>().tick;
+        world.resource_mut::<EventLog>().push(
             tick,
             Event::EntityMoved {
-                entity: intruder_entity,
-                from,
+                entity: intruder,
+                from: intruder_pos,
                 to: next,
             },
         );
     }
+}
+
+fn find_intruder(world: &mut World) -> Option<Entity> {
+    let mut q = world.query_filtered::<Entity, With<Intruder>>();
+    q.iter(world).next()
+}
+
+fn nearest_living_family(world: &mut World, from: Pos) -> Option<(Entity, String, Pos)> {
+    let mut q =
+        world.query_filtered::<(Entity, &Kind, &Position, &Health), (With<Family>, Without<Intruder>)>();
+    q.iter(world)
+        .filter(|(_, _, _, h)| h.is_alive())
+        .min_by_key(|(_, _, p, _)| from.manhattan(p.0))
+        .map(|(e, k, p, _)| (e, k.0.clone(), p.0))
+}
+
+fn push_note(world: &mut World, msg: impl Into<String>) {
+    let tick = world.resource::<Clock>().tick;
+    world
+        .resource_mut::<EventLog>()
+        .push(tick, Event::Note(msg.into()));
 }
 
 fn inside_house(pos: Pos) -> bool {

@@ -2,8 +2,9 @@ use std::env;
 use std::time::Duration;
 
 use fortress_engine::{
-    AsciiRenderer, CompositeRenderer, EventLog, Faction, Health, Item, ItemName, Kind,
-    LogRenderer, Position, Pos, RunOptions, Scenario, Simulation, VoxelWorld, Wearing,
+    function_capacity, AsciiRenderer, BodyPartKind, CompositeRenderer, EventLog, Faction,
+    Function, Health, Item, ItemName, Kind, LogRenderer, PartHealth, PartOf, PartStatus,
+    Position, Pos, RunOptions, Scenario, Simulation, VoxelWorld, Wearing,
 };
 
 mod home_invasion;
@@ -44,7 +45,11 @@ fn main() {
     } else {
         Some(Duration::from_millis(pace_ms))
     };
-    let options = RunOptions { max_ticks, pacing };
+    let options = RunOptions {
+        max_ticks,
+        pacing,
+        ..RunOptions::default()
+    };
 
     let mut sim = Simulation::new();
     let final_tick = match scenario_name.as_str() {
@@ -87,13 +92,26 @@ fn print_summary<S: Scenario>(scenario: &S, sim: &mut Simulation, tick: u64) {
     };
     println!("items:       {item_count}");
 
-    type CreatureRow = (bool, String, i32, String, Pos, Vec<(String, String)>);
+    type CreatureRow = (
+        bevy_ecs::entity::Entity,
+        bool,
+        String,
+        i32,
+        String,
+        Pos,
+        Vec<(String, String)>,
+    );
     let creature_rows: Vec<CreatureRow> = {
-        let mut q = sim
-            .world
-            .query::<(&Kind, &Position, &Health, Option<&Faction>, Option<&Wearing>)>();
+        let mut q = sim.world.query::<(
+            bevy_ecs::entity::Entity,
+            &Kind,
+            &Position,
+            &Health,
+            Option<&Faction>,
+            Option<&Wearing>,
+        )>();
         q.iter(&sim.world)
-            .map(|(kind, pos, health, faction, wearing)| {
+            .map(|(entity, kind, pos, health, faction, wearing)| {
                 let equipment = wearing
                     .map(|w| {
                         w.iter()
@@ -109,6 +127,7 @@ fn print_summary<S: Scenario>(scenario: &S, sim: &mut Simulation, tick: u64) {
                     })
                     .unwrap_or_default();
                 (
+                    entity,
                     health.is_alive(),
                     kind.0.clone(),
                     health.current,
@@ -121,17 +140,67 @@ fn print_summary<S: Scenario>(scenario: &S, sim: &mut Simulation, tick: u64) {
     };
 
     let total = creature_rows.len();
-    let alive = creature_rows.iter().filter(|r| r.0).count();
+    let alive = creature_rows.iter().filter(|r| r.1).count();
     println!("entities:    {total}");
     println!("alive:       {alive}");
-    for (is_alive, kind, hp, faction, pos, equipment) in creature_rows {
+    for (entity, is_alive, kind, hp, faction, pos, equipment) in creature_rows {
         let status = if is_alive { "alive" } else { "dead " };
         println!(
             "  [{}] {:10} hp={:>4} faction={:<8} pos=({:>3},{:>3},{:>3})",
             status, kind, hp, faction, pos.x, pos.y, pos.z,
         );
+        let damaged = collect_damaged_parts(sim, entity);
+        if !damaged.is_empty() {
+            println!("           wounds:");
+            for (part, status, current, max) in damaged {
+                println!("             {} [{}] ({}/{} hp)", part, status, current, max);
+            }
+        }
+        let functions = creature_function_summary(sim, entity);
+        if !functions.is_empty() {
+            print!("           senses:");
+            for (function, capacity) in functions {
+                print!(" {}={:.1}", function, capacity);
+            }
+            println!();
+        }
         for (slot, name) in equipment {
-            println!("        {slot:>10}: {name}");
+            println!("           {slot:>9}: {name}");
         }
     }
+}
+
+fn collect_damaged_parts(
+    sim: &mut Simulation,
+    creature: bevy_ecs::entity::Entity,
+) -> Vec<(&'static str, &'static str, i32, i32)> {
+    let mut q = sim
+        .world
+        .query::<(&PartOf, &BodyPartKind, &PartHealth)>();
+    let mut rows: Vec<(&'static str, &'static str, i32, i32)> = q
+        .iter(&sim.world)
+        .filter(|(parent, _, ph)| parent.0 == creature && ph.status != PartStatus::Intact)
+        .map(|(_, kind, ph)| (kind.label(), ph.status.label(), ph.current, ph.max))
+        .collect();
+    rows.sort_by_key(|r| r.0);
+    rows
+}
+
+fn creature_function_summary(
+    sim: &mut Simulation,
+    creature: bevy_ecs::entity::Entity,
+) -> Vec<(&'static str, f32)> {
+    [
+        Function::Vision,
+        Function::Hearing,
+        Function::Smell,
+        Function::Speech,
+        Function::Grasp,
+        Function::Mobility,
+        Function::Vitality,
+        Function::Breathing,
+    ]
+    .into_iter()
+    .map(|f| (f.label(), function_capacity(&mut sim.world, creature, f)))
+    .collect()
 }

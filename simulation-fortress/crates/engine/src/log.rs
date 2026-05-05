@@ -6,6 +6,7 @@
 
 use bevy_ecs::prelude::{Entity, Resource, World};
 
+use crate::anatomy::{BodyPartKind, PartStatus};
 use crate::components::Kind;
 use crate::items::{BodySlot, ItemName};
 use crate::time::Tick;
@@ -63,6 +64,19 @@ pub enum Event {
         dropper: Entity,
         item: Entity,
         at: Pos,
+    },
+    BodyPartWounded {
+        entity: Entity,
+        part: BodyPartKind,
+        damage: i32,
+        status: PartStatus,
+        weapon: String,
+    },
+    BodyPartDestroyed {
+        entity: Entity,
+        part: BodyPartKind,
+        status: PartStatus,
+        weapon: String,
     },
 }
 
@@ -192,6 +206,46 @@ pub fn narrate(event: &Event, world: &World) -> String {
             at.y,
             at.z
         ),
+        Event::BodyPartWounded {
+            entity,
+            part,
+            damage,
+            status,
+            weapon,
+        } => format!(
+            "{}'s {} is {} by the {} ({} dmg).",
+            label(*entity, world),
+            part.label(),
+            status.label(),
+            weapon,
+            damage,
+        ),
+        Event::BodyPartDestroyed {
+            entity,
+            part,
+            status,
+            weapon,
+        } => match status {
+            PartStatus::Severed => format!(
+                "{}'s {} is sheared off by the {}!",
+                label(*entity, world),
+                part.label(),
+                weapon,
+            ),
+            PartStatus::Crushed => format!(
+                "{}'s {} is crushed beyond use by the {}.",
+                label(*entity, world),
+                part.label(),
+                weapon,
+            ),
+            other => format!(
+                "{}'s {} is {} by the {}.",
+                label(*entity, world),
+                part.label(),
+                other.label(),
+                weapon,
+            ),
+        },
     }
 }
 

@@ -8,17 +8,25 @@
 //! ECS world during `setup` and registering systems on a `Schedule`.
 
 pub mod actions;
+pub mod anatomy;
+pub mod combat;
 pub mod components;
 pub mod items;
 pub mod log;
 pub mod pathfind;
 pub mod render;
+pub mod rng;
 pub mod scenario;
 pub mod simulation;
 pub mod time;
 pub mod world;
 
 pub use actions::{fill_region_logged, note, set_voxel_logged, spawn_creature};
+pub use anatomy::{
+    anatomy_alive, function_capacity, part_functions, spawn_humanoid_body, BodyPart,
+    BodyPartKind, Function, HitWeight, PartHealth, PartOf, PartStatus,
+};
+pub use combat::{resolve_attack, AttackResult};
 pub use components::{ExtraData, Faction, Health, Kind, Position};
 pub use items::{
     drop_item, equip_item, give_item, held_weapons_summary, item_world_position, unequip_item,
@@ -30,6 +38,7 @@ pub use pathfind::find_path;
 pub use render::{
     AsciiRenderer, CompositeRenderer, LogRenderer, NullRenderer, Renderer,
 };
+pub use rng::Rng;
 pub use scenario::Scenario;
 pub use simulation::{RunOptions, Simulation};
 pub use time::{Clock, Tick};
