@@ -18,6 +18,13 @@ impl Pos {
         (self.x - other.x).abs() + (self.y - other.y).abs() + (self.z - other.z).abs()
     }
 
+    pub fn chebyshev(self, other: Pos) -> i32 {
+        (self.x - other.x)
+            .abs()
+            .max((self.y - other.y).abs())
+            .max((self.z - other.z).abs())
+    }
+
     pub fn step_toward(self, target: Pos) -> Pos {
         Pos {
             x: self.x + (target.x - self.x).signum(),

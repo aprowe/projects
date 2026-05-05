@@ -22,6 +22,7 @@ pub mod render;
 pub mod rng;
 pub mod scenario;
 pub mod simulation;
+pub mod sound;
 pub mod tasks;
 pub mod time;
 pub mod world;
@@ -57,6 +58,10 @@ pub use render::{
 pub use rng::Rng;
 pub use scenario::Scenario;
 pub use simulation::{RunOptions, Simulation};
+pub use sound::{
+    emit_combat_sounds, emit_movement_sounds, emit_scream, update_hearing, HeardSound, Hearing,
+    Perceived, SoundKind,
+};
 pub use tasks::{
     execute_tasks, retaliation_system, Goal, RetaliateOnAttack, Task, TaskQueue,
 };

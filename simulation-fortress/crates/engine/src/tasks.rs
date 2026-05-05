@@ -41,6 +41,10 @@ pub enum Goal {
     Kill(Entity),
     Tend(Entity),
     Eat(Entity),
+    /// Flee toward a destination tile (typically away from a perceived
+    /// threat). Scenarios should also set `Locomotion::Running` on the
+    /// fleeing actor; the goal itself is just intent.
+    Flee(Pos),
 }
 
 impl Goal {
@@ -51,6 +55,7 @@ impl Goal {
             Goal::Kill(e) => format!("kill #{}", e.index()),
             Goal::Tend(e) => format!("tend #{}", e.index()),
             Goal::Eat(e) => format!("eat #{}", e.index()),
+            Goal::Flee(p) => format!("flee to ({}, {}, {})", p.x, p.y, p.z),
         }
     }
 }

@@ -209,7 +209,11 @@ impl Renderer for LogRenderer {
             let log = world.resource::<EventLog>();
             log.events_at(tick).cloned().collect()
         };
-        let sentences: Vec<String> = events.iter().map(|e| narrate(e, world)).collect();
+        let sentences: Vec<String> = events
+            .iter()
+            .map(|e| narrate(e, world))
+            .filter(|s| !s.is_empty())
+            .collect();
 
         if sentences.is_empty() {
             if self.announce_quiet {

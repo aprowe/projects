@@ -627,6 +627,64 @@ Open questions:
 - Authoring: hand-written for the canonical ones, or generative
   (LLM produces "salt + slug → shrivel" on demand)?
 
+## 15d. Sound + perception — partial
+
+Sound is the engine's way of letting unrelated entities react to
+events that happened across the map: a scream alerts neighbors, a
+gunshot summons zombies, footsteps give a sneaking thief away.
+
+Two halves:
+
+- **Emission.** `Event::SoundEmitted { source, position, kind,
+  intensity }` is a structural event in the log. Two engine systems
+  derive sounds from existing events:
+  - `emit_combat_sounds` reads `EntityAttacked`; emits a `Scream` at
+    the victim's position (intensity scales with damage) and a
+    `Blow` at the attacker's.
+  - `emit_movement_sounds` reads `EntityMoved` + the mover's
+    `Locomotion`; emits a `Footstep` whose intensity scales:
+    Standing/Sneaking 0.0, Crawling 0.05, Walking 0.15, Running 0.45.
+- **Hearing.** `Hearing { range }` is a component on listeners.
+  `update_hearing` walks every listener and writes a fresh
+  `Perceived { heard: Vec<HeardSound> }` from this tick's emitted
+  sounds. A sound at distance *d* with intensity *i* is heard if
+  *d ≤ range × i*; the listener gets an apparent intensity that
+  attenuates linearly to zero at the audibility edge.
+
+`SoundKind`: Scream, Blow, Footstep, Speech, Bang, Other(String).
+The narrator ignores Footsteps and Speech (too noisy) and renders
+Scream/Bang into prose.
+
+Code: `crates/engine/src/sound.rs`
+
+**Demo.** The zombie-in-office REPL test (`examples/zombie-in-office.txt`)
+now plays out very differently. After tick 22 (alice's first wound),
+the engine emits a Scream → all four workers' `Perceived.heard`
+contains it → the office's `react_to_panic` system flips them all to
+`Goal::Flee(corner)` + `Locomotion::Running` + a fear spike. Newly
+terrified workers emit their own scream (panic propagation). The
+office empties to the far corner; alice tries to flee too but the
+zombie keeps catching up; when alice's fear decays below the
+"shaken" threshold, the planner returns workers to Idle.
+
+Goal added: `Goal::Flee(Pos)` — used by panicking civilians.
+Helper: `emit_scream(world, entity, intensity)`.
+Pos helper: `Pos::chebyshev` for sound-distance checks.
+
+Open work:
+
+- **Sight cones.** Currently only hearing is wired; sight is
+  important for stealth/thief market scenarios. A `Sight { range,
+  fov_deg }` component + voxel line-of-sight scan would add
+  `Perceived.seen`.
+- **Locomotion ↔ sound** on attacks: a heavy crowbar swing should
+  emit a Bang, not just a Blow. Today all weapons share the same
+  Blow intensity.
+- **Per-entity stealth modifier**: a `Stealth(f32)` skill that
+  reduces movement loudness, for thieves.
+- **Sound through walls**: voxel walls should attenuate sound
+  intensity. Today sound passes through everything.
+
 ## 16a. Runtime event injection — partial
 
 Anything that mutates the world from the outside — a REPL, a future

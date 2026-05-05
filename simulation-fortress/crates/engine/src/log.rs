@@ -9,6 +9,7 @@ use bevy_ecs::prelude::{Entity, Resource, World};
 use crate::anatomy::{BodyPartKind, PartStatus};
 use crate::components::Kind;
 use crate::items::{BodySlot, ItemName};
+use crate::sound::SoundKind;
 use crate::time::Tick;
 use crate::world::{MaterialId, Pos};
 
@@ -95,6 +96,17 @@ pub enum Event {
     /// threshold for the first time during a combat exchange.
     Terrified {
         entity: Entity,
+    },
+    /// A sound emitted at a position. Read by `update_hearing` to
+    /// populate `Perceived` components on listeners. Footsteps and
+    /// ordinary speech are intentionally noisy to support
+    /// stealth/perception scenarios; the prose narrator filters
+    /// these out.
+    SoundEmitted {
+        source: Option<Entity>,
+        position: Pos,
+        kind: SoundKind,
+        intensity: f32,
     },
 }
 
@@ -259,6 +271,27 @@ pub fn narrate(event: &Event, world: &World) -> String {
         ),
         Event::Terrified { entity } => {
             format!("{} is wide-eyed with terror.", label(*entity, world))
+        }
+        Event::SoundEmitted {
+            kind,
+            position,
+            source: _,
+            intensity: _,
+        } => {
+            if !kind.is_narrated() {
+                return String::new();
+            }
+            match kind {
+                SoundKind::Scream => format!(
+                    "A scream pierces the air from ({}, {}, {}).",
+                    position.x, position.y, position.z
+                ),
+                SoundKind::Bang => format!(
+                    "A loud bang echoes from ({}, {}, {}).",
+                    position.x, position.y, position.z
+                ),
+                _ => String::new(),
+            }
         }
         Event::BodyPartDestroyed {
             entity,
