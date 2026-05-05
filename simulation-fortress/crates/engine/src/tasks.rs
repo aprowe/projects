@@ -83,6 +83,15 @@ pub enum Task {
     PickUp(Entity),
     /// Equip an item the actor possesses (must have `Wearable`).
     Equip(Entity),
+    /// Throw an item the actor possesses at `target_pos`. The item
+    /// is dropped at the landing tile (or its trajectory's first
+    /// blocked tile). If a creature is at the impact tile, takes
+    /// damage based on the item's mass.
+    Throw(Entity, Pos),
+    /// Fire a ranged weapon held in the main hand at `target`.
+    /// Requires `RangedWeapon` + `Ammo` in inventory; consumes one
+    /// round; resolves with line-of-fire vs. AC.
+    Shoot(Entity),
 }
 
 impl Task {
@@ -94,6 +103,8 @@ impl Task {
             Task::UseEntity(e) => format!("UseEntity(#{})", e.index()),
             Task::PickUp(e) => format!("PickUp(#{})", e.index()),
             Task::Equip(e) => format!("Equip(#{})", e.index()),
+            Task::Throw(item, p) => format!("Throw(#{}, ({}, {}, {}))", item.index(), p.x, p.y, p.z),
+            Task::Shoot(e) => format!("Shoot(#{})", e.index()),
         }
     }
 }
@@ -240,6 +251,8 @@ fn execute_one(world: &mut World, actor: Entity, task: Task) -> TaskOutcome {
         Task::UseEntity(target) => execute_use(world, actor, target),
         Task::PickUp(item) => execute_pickup(world, actor, item),
         Task::Equip(item) => execute_equip(world, actor, item),
+        Task::Throw(item, target_pos) => execute_throw(world, actor, item, target_pos),
+        Task::Shoot(target) => execute_shoot(world, actor, target),
     }
 }
 
@@ -374,6 +387,173 @@ fn execute_equip(world: &mut World, actor: Entity, item: Entity) -> TaskOutcome 
     } else {
         TaskOutcome::Failed("item not wearable")
     }
+}
+
+fn execute_throw(world: &mut World, actor: Entity, item: Entity, target_pos: Pos) -> TaskOutcome {
+    use crate::items::{Inventory, Mass, Wearing};
+    let actor_pos = match world.get::<Position>(actor) {
+        Some(p) => p.0,
+        None => return TaskOutcome::Failed("no position"),
+    };
+    // Verify the actor possesses the item.
+    let in_inventory = world
+        .get::<Inventory>(actor)
+        .map(|i| i.0.contains(&item))
+        .unwrap_or(false);
+    let in_wearing = world
+        .get::<Wearing>(actor)
+        .map(|w| w.iter().any(|(_, e)| e == item))
+        .unwrap_or(false);
+    if !in_inventory && !in_wearing {
+        return TaskOutcome::Failed("not holding the item");
+    }
+    let mass = world.get::<Mass>(item).map(|m| m.0).unwrap_or(0.5);
+    // Walk a Bresenham-ish line from actor to target_pos; the
+    // projectile lands at the first solid voxel or at the target.
+    let landing = trace_line(world, actor_pos, target_pos);
+    // Detach from owner: remove from inventory/wearing, add Position.
+    if let Some(mut inv) = world.get_mut::<Inventory>(actor) {
+        inv.0.retain(|&e| e != item);
+    }
+    if let Some(mut wearing) = world.get_mut::<Wearing>(actor) {
+        wearing.0.retain(|_, &mut e| e != item);
+    }
+    world.entity_mut(item).insert(Position(landing));
+    push_event(
+        world,
+        Event::ItemDropped {
+            dropper: actor,
+            item,
+            at: landing,
+        },
+    );
+    // If a creature is at the landing tile, take impact damage
+    // proportional to mass (heavier = more damage). Capped at 6.
+    let victim: Option<Entity> = {
+        let mut q = world.query::<(Entity, &Position, &Health)>();
+        q.iter(world)
+            .filter(|(e, p, h)| *e != actor && *e != item && p.0 == landing && h.is_alive())
+            .map(|(e, _, _)| e)
+            .next()
+    };
+    if let Some(target) = victim {
+        let damage = (mass * 1.5).round().clamp(1.0, 6.0) as i32;
+        if let Some(mut h) = world.get_mut::<Health>(target) {
+            h.current = (h.current - damage).max(0);
+        }
+        let remaining = world.get::<Health>(target).map(|h| h.current).unwrap_or(0);
+        push_event(
+            world,
+            Event::EntityAttacked {
+                attacker: Some(actor),
+                target,
+                damage,
+                remaining_health: remaining,
+            },
+        );
+        if remaining == 0 {
+            push_event(
+                world,
+                Event::EntityKilled {
+                    entity: target,
+                    by: Some(actor),
+                },
+            );
+        }
+    }
+    TaskOutcome::Complete
+}
+
+fn execute_shoot(world: &mut World, actor: Entity, target: Entity) -> TaskOutcome {
+    use crate::combat::resolve_attack;
+    let target_alive = world
+        .get::<Health>(target)
+        .map(|h| h.is_alive())
+        .unwrap_or(false);
+    if !target_alive {
+        return TaskOutcome::Complete;
+    }
+    let actor_pos = match world.get::<Position>(actor) {
+        Some(p) => p.0,
+        None => return TaskOutcome::Failed("no position"),
+    };
+    let target_pos = match world.get::<Position>(target) {
+        Some(p) => p.0,
+        None => return TaskOutcome::Failed("target has no position"),
+    };
+    let dist = actor_pos.chebyshev(target_pos);
+    // Check the wielded weapon is ranged with enough range.
+    let weapon_range = ranged_weapon_range(world, actor);
+    if weapon_range == 0 || dist > weapon_range {
+        return TaskOutcome::Failed("target out of range");
+    }
+    if crate::sound::line_of_sight_blocked(world, actor_pos, target_pos) {
+        return TaskOutcome::Failed("no line of fire");
+    }
+    // Consume one round of ammo.
+    if !consume_ammo(world, actor) {
+        return TaskOutcome::Failed("no ammo");
+    }
+    resolve_attack(world, actor, target);
+    TaskOutcome::Continue
+}
+
+/// March a coarse straight line from `from` to `to`. Stops on the
+/// first solid voxel; returns the last walkable tile (or `to`).
+fn trace_line(world: &World, from: Pos, to: Pos) -> Pos {
+    let vw = world.resource::<VoxelWorld>();
+    let dx = (to.x - from.x) as f32;
+    let dy = (to.y - from.y) as f32;
+    let dz = (to.z - from.z) as f32;
+    let len = (dx * dx + dy * dy + dz * dz).sqrt().max(1.0);
+    let steps = (len * 2.0).ceil() as i32;
+    let mut last = from;
+    for i in 1..=steps {
+        let t = i as f32 / steps as f32;
+        let p = Pos::new(
+            (from.x as f32 + dx * t).round() as i32,
+            (from.y as f32 + dy * t).round() as i32,
+            (from.z as f32 + dz * t).round() as i32,
+        );
+        if vw.is_solid(p) {
+            return last;
+        }
+        last = p;
+    }
+    to
+}
+
+fn ranged_weapon_range(world: &World, actor: Entity) -> i32 {
+    use crate::items::{BodySlot, RangedWeapon, Wearing};
+    let item = match world.get::<Wearing>(actor).and_then(|w| w.get(BodySlot::MainHand)) {
+        Some(e) => e,
+        None => return 0,
+    };
+    world.get::<RangedWeapon>(item).map(|r| r.range).unwrap_or(0)
+}
+
+fn consume_ammo(world: &mut World, actor: Entity) -> bool {
+    use crate::items::{Ammo, Inventory};
+    let to_remove = {
+        let inv = match world.get::<Inventory>(actor) {
+            Some(i) => i,
+            None => return false,
+        };
+        inv.0
+            .iter()
+            .copied()
+            .find(|e| world.get::<Ammo>(*e).is_some())
+    };
+    let item = match to_remove {
+        Some(e) => e,
+        None => return false,
+    };
+    if let Some(mut inv) = world.get_mut::<Inventory>(actor) {
+        inv.0.retain(|&e| e != item);
+    }
+    // Despawn the consumed round.
+    world.despawn(item);
+    true
 }
 
 fn chebyshev(a: Pos, b: Pos) -> i32 {

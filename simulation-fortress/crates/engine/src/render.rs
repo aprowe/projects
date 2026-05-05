@@ -8,10 +8,12 @@ use std::collections::HashMap;
 
 use bevy_ecs::prelude::World;
 
+use crate::blemish::{Blemishes, Finish};
 use crate::components::{Faction, Health, Kind, Position};
+use crate::furniture::Container;
 use crate::items::ItemMaterial;
 use crate::log::{narrate, EventLog};
-use crate::quality::Paint;
+use crate::quality::{Paint, Quality, Style, Value};
 use crate::time::Tick;
 use crate::world::{MaterialId, Pos, TileKind, VoxelWorld};
 
@@ -148,8 +150,9 @@ impl AsciiRenderer {
         if tick != 0 && !tick.is_multiple_of(self.frame_every) {
             return None;
         }
-        // overlay map: (x, y) -> (glyph, optional explicit color)
-        let mut overlay: HashMap<(i32, i32), (char, Option<[u8; 3]>)> = HashMap::new();
+        // overlay map: (x, y) -> (glyph, optional explicit color, tooltip text)
+        type CellInfo = (char, Option<[u8; 3]>, String);
+        let mut overlay: HashMap<(i32, i32), CellInfo> = HashMap::new();
         let mut total = 0usize;
         let mut alive = 0usize;
         let mut q = world.query::<(
@@ -159,9 +162,18 @@ impl AsciiRenderer {
             Option<&Faction>,
             Option<&Paint>,
             Option<&ItemMaterial>,
+            Option<&Quality>,
+            Option<&Style>,
+            Option<&Value>,
+            Option<&Finish>,
+            Option<&Blemishes>,
+            Option<&Container>,
         )>();
         let voxel_world = world.resource::<VoxelWorld>();
-        for (kind, pos, health, faction, paint, item_material) in q.iter(world) {
+        for (kind, pos, health, faction, paint, item_material,
+             quality, style, value, finish, blemishes, container)
+            in q.iter(world)
+        {
             if let Some(h) = health {
                 total += 1;
                 if !h.is_alive() {
@@ -187,37 +199,98 @@ impl AsciiRenderer {
                 item_material
                     .and_then(|m| voxel_world.material(m.0).map(|mat| mat.color))
             });
-            overlay.entry((pos.0.x, pos.0.y)).or_insert((glyph, color));
+            // Build tooltip text. Include kind, faction, hp, value,
+            // quality+style, blemishes, container open/locked.
+            let mut tip = String::new();
+            tip.push_str(&kind.0);
+            if let Some(q) = quality {
+                tip.push_str(&format!(" — {} quality", q.label()));
+            }
+            if let Some(s) = style {
+                tip.push_str(&format!(", {} style", s.label()));
+            }
+            if let Some(f) = finish {
+                let l = f.label();
+                if !l.is_empty() {
+                    tip.push_str(&format!(", {l} finish"));
+                }
+            }
+            if let Some(v) = value {
+                if v.0 > 0 {
+                    tip.push_str(&format!(", value ${}", v.0));
+                }
+            }
+            if let Some(faction) = faction {
+                tip.push_str(&format!("\nfaction: {}", faction.0));
+            }
+            if let Some(h) = health {
+                tip.push_str(&format!("\nhp: {}/{}", h.current, h.max));
+            }
+            if let Some(c) = container {
+                if c.locked {
+                    tip.push_str(&format!(
+                        "\ncontainer: locked (DC {}), {} items",
+                        c.lock_dc,
+                        c.items.len()
+                    ));
+                } else if c.open {
+                    tip.push_str("\ncontainer: open");
+                } else {
+                    tip.push_str(&format!("\ncontainer: closed, {} items", c.items.len()));
+                }
+            }
+            if let Some(b) = blemishes {
+                for blem in &b.0 {
+                    tip.push_str(&format!("\n• {} {}", blem.kind.label(), blem.location));
+                }
+            }
+            overlay.entry((pos.0.x, pos.0.y)).or_insert((glyph, color, tip));
         }
 
         // First pass: collect unique color pairs into a palette so
         // every cell can emit a short class name (`c0`, `c1`, …)
         // instead of a long inline style. Classes are scoped to this
-        // frame via a uniquifying prefix.
+        // frame via a uniquifying prefix. Cells additionally carry
+        // a tooltip string for hover.
         let mut palette: Vec<([u8; 3], [u8; 3])> = Vec::new();
         let mut palette_index: HashMap<([u8; 3], [u8; 3]), usize> = HashMap::new();
-        let mut cells: Vec<(usize, char)> = Vec::with_capacity(
+        type CellOut = (usize, char, String);
+        let mut cells: Vec<CellOut> = Vec::with_capacity(
             ((self.max.y - self.min.y + 1) * (self.max.x - self.min.x + 1)) as usize,
         );
         for y in self.min.y..=self.max.y {
             for x in self.min.x..=self.max.x {
                 let pos = Pos::new(x, y, self.z);
                 let voxel = voxel_world.voxel(pos);
+                let mat_name = voxel_world
+                    .material(voxel.material)
+                    .map(|m| m.name.as_str())
+                    .unwrap_or("air");
                 let bg = voxel_world
                     .material(voxel.material)
                     .map(|m| m.color)
                     .unwrap_or([24, 24, 24]);
-                let (glyph, fg) = match overlay.get(&(x, y)) {
-                    Some((g, Some(c))) => (*g, *c),
-                    Some((g, None)) => (*g, contrast_for(bg)),
-                    None => (
-                        self.glyph_for_voxel(voxel_world, pos),
-                        match voxel.kind {
-                            TileKind::Wall => bg,
-                            TileKind::Floor => mix(bg, [200, 200, 200], 0.30),
-                            _ => contrast_for(bg),
-                        },
-                    ),
+                let (glyph, fg, tip) = match overlay.get(&(x, y)) {
+                    Some((g, Some(c), t)) => (*g, *c, t.clone()),
+                    Some((g, None, t)) => (*g, contrast_for(bg), t.clone()),
+                    None => {
+                        let kind_label = match voxel.kind {
+                            TileKind::Wall => "wall",
+                            TileKind::Floor => "floor",
+                            TileKind::RampUp => "ramp",
+                            TileKind::Empty => "air",
+                        };
+                        let tip = format!("{kind_label} ({mat_name}) at ({x}, {y}, {})", self.z);
+                        (
+                            self.glyph_for_voxel(voxel_world, pos),
+                            match voxel.kind {
+                                TileKind::Wall => bg,
+                                TileKind::Floor => mix(bg, [200, 200, 200], 0.30),
+                                _ => contrast_for(bg),
+                            },
+                            tip,
+                        )
+                    }
                 };
                 let key = (fg, bg);
                 let idx = match palette_index.get(&key) {
@@ -229,7 +302,7 @@ impl AsciiRenderer {
                         i
                     }
                 };
-                cells.push((idx, glyph));
+                cells.push((idx, glyph, tip));
             }
         }
 
@@ -250,7 +323,7 @@ impl AsciiRenderer {
         ));
         out.push_str("<div class=\"map\">");
         let width = (self.max.x - self.min.x + 1) as usize;
-        for (i, (cls, glyph)) in cells.iter().enumerate() {
+        for (i, (cls, glyph, tip)) in cells.iter().enumerate() {
             if i % width == 0 {
                 if i != 0 {
                     out.push_str("</div>");
@@ -265,14 +338,20 @@ impl AsciiRenderer {
                 ' ' => "&nbsp;",
                 _ => "",
             };
+            // Escape the tooltip for HTML attribute use.
+            let attr = tip
+                .replace('&', "&amp;")
+                .replace('<', "&lt;")
+                .replace('>', "&gt;")
+                .replace('"', "&quot;");
             if escaped.is_empty() {
                 out.push_str(&format!(
-                    "<span class=\"{prefix}-{cls}\">{}</span>",
+                    "<span class=\"{prefix}-{cls}\" title=\"{attr}\">{}</span>",
                     glyph
                 ));
             } else {
                 out.push_str(&format!(
-                    "<span class=\"{prefix}-{cls}\">{escaped}</span>"
+                    "<span class=\"{prefix}-{cls}\" title=\"{attr}\">{escaped}</span>"
                 ));
             }
         }

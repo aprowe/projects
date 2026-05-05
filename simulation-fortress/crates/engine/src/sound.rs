@@ -355,9 +355,13 @@ pub fn update_hearing(world: &mut World) {
 /// `Perceived.seen` list — every other living creature within range
 /// whose tile has a clear voxel line of sight from the observer.
 pub fn update_sight(world: &mut World) {
+    // Time-of-day dims (or boosts) sight.
+    let sight_mult = world.resource::<crate::time::Clock>().time_of_day().sight_multiplier();
     let observers: Vec<(Entity, Pos, i32)> = {
         let mut q = world.query::<(Entity, &Position, &Sight)>();
-        q.iter(world).map(|(e, p, s)| (e, p.0, s.range)).collect()
+        q.iter(world)
+            .map(|(e, p, s)| (e, p.0, ((s.range as f32) * sight_mult).round() as i32))
+            .collect()
     };
     let candidates: Vec<(Entity, Pos)> = {
         let mut q = world

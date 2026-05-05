@@ -62,6 +62,7 @@ impl Simulation {
         let mut world = World::new();
         world.insert_resource(VoxelWorld::new());
         world.insert_resource(Clock::default());
+        world.insert_resource(crate::time::Weather::default());
         world.insert_resource(EventLog::default());
         world.insert_resource(Library::default());
         Self { world }

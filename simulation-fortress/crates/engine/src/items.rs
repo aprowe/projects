@@ -141,6 +141,47 @@ impl BodySlot {
 #[derive(Component, Copy, Clone, Debug)]
 pub struct Wearable(pub BodySlot);
 
+/// Marks a weapon as two-handed; equipping clears the off-hand. The
+/// equip helper checks this and refuses if the off-hand is busy.
+#[derive(Component, Copy, Clone, Debug)]
+pub struct TwoHanded;
+
+/// Tag: this weapon shoots projectiles. `range` is the maximum
+/// chebyshev tile distance at which `Task::Shoot` will resolve.
+/// Damage is still driven by `DamageDice` on the weapon.
+#[derive(Component, Copy, Clone, Debug)]
+pub struct RangedWeapon {
+    pub range: i32,
+    pub ammo_kind: AmmoKind,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+pub enum AmmoKind {
+    Pistol9mm,
+    Shotgun12g,
+    Rifle308,
+    BowArrow,
+    CrossbowBolt,
+    ThrownDagger,
+}
+
+impl AmmoKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            AmmoKind::Pistol9mm => "9mm",
+            AmmoKind::Shotgun12g => "12-gauge shell",
+            AmmoKind::Rifle308 => ".308 cartridge",
+            AmmoKind::BowArrow => "arrow",
+            AmmoKind::CrossbowBolt => "crossbow bolt",
+            AmmoKind::ThrownDagger => "dagger",
+        }
+    }
+}
+
+/// One round of ammunition. Despawned when consumed.
+#[derive(Component, Copy, Clone, Debug)]
+pub struct Ammo(pub AmmoKind);
+
 /// Unstructured carry: items in pockets, satchels, hands without a slot.
 #[derive(Component, Default, Debug)]
 pub struct Inventory(pub Vec<Entity>);
@@ -197,17 +238,27 @@ pub fn give_item(world: &mut World, holder: Entity, item: Entity) {
 /// `Wearable` component.
 pub fn equip_item(world: &mut World, wearer: Entity, item: Entity) -> Option<BodySlot> {
     let slot = world.get::<Wearable>(item)?.0;
+    let two_handed = world.get::<TwoHanded>(item).is_some();
 
     let mut entity_mut = world.entity_mut(wearer);
     if !entity_mut.contains::<Wearing>() {
         entity_mut.insert(Wearing::default());
     }
-    let displaced = {
+    let (displaced, displaced_offhand) = {
         let mut wearing = entity_mut.get_mut::<Wearing>().expect("just inserted");
-        wearing.0.insert(slot, item)
+        let prev = wearing.0.insert(slot, item);
+        let off = if two_handed && slot == BodySlot::MainHand {
+            wearing.0.remove(&BodySlot::OffHand)
+        } else {
+            None
+        };
+        (prev, off)
     };
     if let Some(prev) = displaced {
         give_item(world, wearer, prev);
+    }
+    if let Some(off) = displaced_offhand {
+        give_item(world, wearer, off);
     }
     let tick = world.resource::<Clock>().tick;
     world.resource_mut::<EventLog>().push(

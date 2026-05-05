@@ -404,6 +404,45 @@ pub fn dragon_body_plan() -> BodyPlan {
         .with(BodyPartSpec::new(BodyPartKind::Tail, 60, 6))
 }
 
+/// Smaller flying creature: head, wings, light body, no arms or
+/// real legs. Beak provides bite; wings provide Flight.
+pub fn bird_body_plan() -> BodyPlan {
+    BodyPlan::new()
+        .with(BodyPartSpec::new(BodyPartKind::Head, 8, 6))
+        .with(BodyPartSpec::new(BodyPartKind::LeftEye, 2, 2))
+        .with(BodyPartSpec::new(BodyPartKind::RightEye, 2, 2))
+        .with(BodyPartSpec::new(BodyPartKind::Mouth, 3, 3).labeled("beak"))
+        .with(BodyPartSpec::new(BodyPartKind::Neck, 5, 2))
+        .with(BodyPartSpec::new(BodyPartKind::Torso, 18, 16))
+        .with(BodyPartSpec::new(BodyPartKind::Heart, 4, 0))
+        .with(BodyPartSpec::new(BodyPartKind::LeftLung, 4, 0))
+        .with(BodyPartSpec::new(BodyPartKind::RightLung, 4, 0))
+        .with(BodyPartSpec::new(BodyPartKind::Stomach, 4, 0))
+        .with(BodyPartSpec::new(BodyPartKind::LeftWing, 12, 8))
+        .with(BodyPartSpec::new(BodyPartKind::RightWing, 12, 8))
+        .with(BodyPartSpec::new(BodyPartKind::LeftLeg, 6, 4).labeled("left talon leg"))
+        .with(BodyPartSpec::new(BodyPartKind::RightLeg, 6, 4).labeled("right talon leg"))
+        .with(BodyPartSpec::new(BodyPartKind::Claw, 4, 1).labeled("left talon"))
+        .with(BodyPartSpec::new(BodyPartKind::Claw, 4, 1).labeled("right talon"))
+        .with(BodyPartSpec::new(BodyPartKind::Tail, 6, 4).labeled("tail feathers"))
+}
+
+/// Long, legless reptile: head with fangs, segmented body, tail.
+/// No legs, wings, or arms.
+pub fn snake_body_plan() -> BodyPlan {
+    BodyPlan::new()
+        .with(BodyPartSpec::new(BodyPartKind::Head, 12, 8))
+        .with(BodyPartSpec::new(BodyPartKind::LeftEye, 2, 2))
+        .with(BodyPartSpec::new(BodyPartKind::RightEye, 2, 2))
+        .with(BodyPartSpec::new(BodyPartKind::Mouth, 8, 5).labeled("fanged jaw"))
+        .with(BodyPartSpec::new(BodyPartKind::Tongue, 4, 0).labeled("forked tongue"))
+        .with(BodyPartSpec::new(BodyPartKind::Neck, 8, 4))
+        .with(BodyPartSpec::new(BodyPartKind::Torso, 30, 60).labeled("coiled body"))
+        .with(BodyPartSpec::new(BodyPartKind::Heart, 5, 0))
+        .with(BodyPartSpec::new(BodyPartKind::Stomach, 5, 0))
+        .with(BodyPartSpec::new(BodyPartKind::Tail, 12, 8))
+}
+
 // ─── queries ────────────────────────────────────────────────────────────────
 
 /// Total functional capacity a creature has for `function`. Reads

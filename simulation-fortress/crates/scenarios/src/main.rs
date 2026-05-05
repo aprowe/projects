@@ -11,6 +11,8 @@ use fortress_engine::{
 use replay::ReplayRenderer;
 
 mod airport;
+mod bank;
+mod cabin;
 mod family_home;
 mod farming;
 mod home_invasion;
@@ -193,9 +195,57 @@ fn main() {
                 replay_html_path.clone(), "airport infiltration",
             )
         }
+        "bank" => {
+            let mut scenario = bank::BankHeist;
+            let ascii = AsciiRenderer::new(Pos::new(0, 0, 0), Pos::new(40, 33, 0))
+                .at_z(0)
+                .frame_every(1)
+                .faction("robber", 'R')
+                .faction("staff", 's')
+                .faction("public", 'p')
+                .faction("police", 'C')
+                .entity_kind("glass front door", '+')
+                .entity_kind("back exit", '+')
+                .entity_kind("vault door", '+')
+                .entity_kind("teller window", 'I')
+                .entity_kind("cash register", '$')
+                .entity_kind("bank vault", 'V')
+                .entity_kind("ATM", 'A')
+                .entity_kind("safety deposit box", 'B')
+                .entity_kind("getaway van", 'V')
+                .entity_kind("police cruiser", 'V');
+            run_with_optional_replay(
+                &mut sim, &mut scenario, options, ascii, repl,
+                replay_html_path.clone(), "bank heist",
+            )
+        }
+        "cabin" => {
+            let mut scenario = cabin::CabinAmbush;
+            let mut ascii = AsciiRenderer::new(Pos::new(0, 0, 0), Pos::new(30, 30, 0))
+                .at_z(0)
+                .frame_every(1)
+                .faction("retiree", 'O')
+                .faction("assassin", 'A');
+            for (k, g) in [
+                ("cabin door", '+'), ("safe", 'S'), ("getaway van", 'V'),
+                ("fireplace", '*'), ("twin bed", 'B'), ("armchair", 'h'),
+                ("bookshelf", 'L'), ("books", 'b'), ("side table", 's'),
+                ("table lamp", 'l'), ("potted plant", '%'),
+                ("oak tree", 'T'), ("pine tree", 't'), ("birch tree", 'T'),
+                ("redwood tree", 'T'), ("sapling", 't'), ("bush", '&'),
+                ("rock", '*'), ("log", '='), ("stump", 'o'),
+                ("camp fire", '*'), ("mailbox", 'M'),
+            ] {
+                ascii = ascii.entity_kind(k, g);
+            }
+            run_with_optional_replay(
+                &mut sim, &mut scenario, options, ascii, repl,
+                replay_html_path.clone(), "retired killer's cabin",
+            )
+        }
         other => {
             eprintln!("unknown scenario: {other}");
-            eprintln!("available: home_invasion, farming, office, family_home, mansion, airport");
+            eprintln!("available: home_invasion, farming, office, family_home, mansion, airport, bank, cabin");
             std::process::exit(1);
         }
     };

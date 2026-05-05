@@ -28,9 +28,9 @@ use crate::furniture::{
     Window,
 };
 use crate::items::{
-    equip_item as engine_equip, give_item, ArmorBonus, BodySlot, DamageDice,
-    ElectricalConductivity, Item, ItemMaterial, ItemName, Mass, Temperature, Texture,
-    ThermalConductivity, Wearable,
+    equip_item as engine_equip, give_item, Ammo, AmmoKind, ArmorBonus, BodySlot, DamageDice,
+    ElectricalConductivity, Item, ItemMaterial, ItemName, Mass, RangedWeapon, Temperature,
+    Texture, ThermalConductivity, TwoHanded, Wearable,
 };
 use crate::quality::{Quality, Style, Value};
 use crate::sound::SoundKind;
@@ -56,6 +56,17 @@ pub struct ItemTemplate {
     pub damage_dice: Option<DamageDice>,
     /// AC bonus when worn. None = no `ArmorBonus` component.
     pub armor_bonus: Option<i32>,
+    /// If set, the item is a ranged weapon firing the named ammo
+    /// kind out to `range` tiles. Spawn helper attaches a
+    /// `RangedWeapon` component.
+    pub ranged: Option<RangedSpec>,
+    /// If set, the item is one round of ammunition.
+    pub ammo: Option<AmmoKind>,
+    /// Two-handed weapons block the off-hand slot when equipped.
+    pub two_handed: bool,
+    /// Optional flavor tag — drug / drink / book / document / tool /
+    /// currency. Used by narrators and scenario planners.
+    pub category: Option<&'static str>,
     /// Craftsmanship tier. Scales combat bonus + value multiplier.
     /// Defaults to `Quality::Standard` if `None`.
     pub quality: Option<Quality>,
@@ -66,6 +77,12 @@ pub struct ItemTemplate {
     /// 0 = worthless (everyday objects).
     pub base_value: u32,
     pub description: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct RangedSpec {
+    pub range: i32,
+    pub ammo_kind: AmmoKind,
 }
 
 #[derive(Clone, Debug)]
@@ -390,6 +407,15 @@ pub fn spawn_item_template(
         if let Some(bonus) = template.armor_bonus {
             e.insert(ArmorBonus((bonus + combat_bonus).max(0)));
         }
+        if let Some(spec) = template.ranged.as_ref() {
+            e.insert(RangedWeapon { range: spec.range, ammo_kind: spec.ammo_kind });
+        }
+        if let Some(kind) = template.ammo {
+            e.insert(Ammo(kind));
+        }
+        if template.two_handed {
+            e.insert(TwoHanded);
+        }
         if opts.equip_on.is_none() && opts.give_to.is_none() {
             if let Some(p) = opts.at {
                 e.insert(Position(p));
@@ -399,7 +425,12 @@ pub fn spawn_item_template(
     };
 
     if let Some(holder) = opts.equip_on {
-        engine_equip(world, holder, id);
+        // Wearable items go to a slot. Anything else (ammo,
+        // currency, medicine) falls through to inventory so the
+        // holder still possesses it.
+        if engine_equip(world, holder, id).is_none() {
+            give_item(world, holder, id);
+        }
     } else if let Some(holder) = opts.give_to {
         give_item(world, holder, id);
     }
@@ -759,6 +790,8 @@ fn populate_body_plans(lib: &mut Library) {
     lib.body_plans.insert("humanoid".into(), humanoid_body_plan());
     lib.body_plans.insert("quadruped".into(), quadruped_body_plan());
     lib.body_plans.insert("dragon".into(), dragon_body_plan());
+    lib.body_plans.insert("bird".into(), crate::anatomy::bird_body_plan());
+    lib.body_plans.insert("snake".into(), crate::anatomy::snake_body_plan());
 }
 
 fn populate_items(lib: &mut Library) {
@@ -784,6 +817,10 @@ fn populate_items(lib: &mut Library) {
             quality: None,
             style: None,
             base_value: 30,
+            ranged: None,
+            ammo: None,
+            two_handed: false,
+            category: Some("weapon"),
             description: desc.into(),
         }
     }
@@ -809,6 +846,10 @@ fn populate_items(lib: &mut Library) {
             quality: None,
             style: None,
             base_value: 20,
+            ranged: None,
+            ammo: None,
+            two_handed: false,
+            category: Some("clothing"),
             description: desc.into(),
         }
     }
@@ -832,6 +873,10 @@ fn populate_items(lib: &mut Library) {
             quality: None,
             style: None,
             base_value: 0,
+            ranged: None,
+            ammo: None,
+            two_handed: false,
+            category: None,
             description: desc.into(),
         }
     }
@@ -900,6 +945,211 @@ fn populate_items(lib: &mut Library) {
                 ..clothing(2.5, Texture::Rough, Torso, "leather", 3,
                     "ballistic vest — substantial AC bonus")
             }),
+
+        // ─── ranged weapons ───────────────────────────────────────
+        ("9mm pistol",
+            ItemTemplate {
+                ranged: Some(RangedSpec { range: 14, ammo_kind: AmmoKind::Pistol9mm }),
+                base_value: 600,
+                ..weapon(0.9, Texture::Polished, "steel",
+                    DamageDice::with_bonus(2, 6, 1),
+                    "compact semi-automatic pistol")
+            }),
+        ("revolver",
+            ItemTemplate {
+                ranged: Some(RangedSpec { range: 12, ammo_kind: AmmoKind::Pistol9mm }),
+                base_value: 500, quality: Some(Quality::Fine),
+                ..weapon(1.1, Texture::Polished, "steel",
+                    DamageDice::with_bonus(2, 6, 2),
+                    "six-shot revolver")
+            }),
+        ("shotgun",
+            ItemTemplate {
+                ranged: Some(RangedSpec { range: 10, ammo_kind: AmmoKind::Shotgun12g }),
+                two_handed: true, base_value: 700,
+                ..weapon(3.5, Texture::Polished, "steel",
+                    DamageDice::with_bonus(3, 6, 0),
+                    "pump-action 12-gauge")
+            }),
+        ("hunting rifle",
+            ItemTemplate {
+                ranged: Some(RangedSpec { range: 22, ammo_kind: AmmoKind::Rifle308 }),
+                two_handed: true, base_value: 900, quality: Some(Quality::Fine),
+                ..weapon(4.0, Texture::Polished, "wood",
+                    DamageDice::with_bonus(3, 8, 1),
+                    ".308 bolt-action rifle")
+            }),
+        ("longbow",
+            ItemTemplate {
+                ranged: Some(RangedSpec { range: 18, ammo_kind: AmmoKind::BowArrow }),
+                two_handed: true, base_value: 200,
+                ..weapon(0.9, Texture::Smooth, "wood",
+                    DamageDice::with_bonus(1, 8, 1),
+                    "yew longbow")
+            }),
+        ("crossbow",
+            ItemTemplate {
+                ranged: Some(RangedSpec { range: 16, ammo_kind: AmmoKind::CrossbowBolt }),
+                two_handed: true, base_value: 350,
+                ..weapon(2.5, Texture::Polished, "wood",
+                    DamageDice::with_bonus(1, 10, 1),
+                    "cocked crossbow")
+            }),
+
+        // ─── ammunition ───────────────────────────────────────────
+        ("9mm round",
+            ItemTemplate {
+                ammo: Some(AmmoKind::Pistol9mm), base_value: 1, category: Some("ammo"),
+                ..misc(0.01, None, Some("steel"), "single 9mm round")
+            }),
+        ("12-gauge shell",
+            ItemTemplate {
+                ammo: Some(AmmoKind::Shotgun12g), base_value: 2, category: Some("ammo"),
+                ..misc(0.04, None, Some("plastic"), "buckshot shell")
+            }),
+        (".308 cartridge",
+            ItemTemplate {
+                ammo: Some(AmmoKind::Rifle308), base_value: 3, category: Some("ammo"),
+                ..misc(0.02, None, Some("steel"), "rifle cartridge")
+            }),
+        ("arrow",
+            ItemTemplate {
+                ammo: Some(AmmoKind::BowArrow), base_value: 1, category: Some("ammo"),
+                ..misc(0.05, Some(Texture::Sharp), Some("wood"), "fletched arrow")
+            }),
+        ("crossbow bolt",
+            ItemTemplate {
+                ammo: Some(AmmoKind::CrossbowBolt), base_value: 1, category: Some("ammo"),
+                ..misc(0.06, Some(Texture::Sharp), Some("steel"), "crossbow bolt")
+            }),
+
+        // ─── tools ────────────────────────────────────────────────
+        ("lockpick",   ItemTemplate { base_value: 25, category: Some("tool"),
+                ..misc(0.02, Some(Texture::Smooth), Some("steel"), "thin tension wrench + pick set") }),
+        ("hammer",     ItemTemplate { base_value: 12, category: Some("tool"),
+                ..weapon(0.9, Texture::Polished, "steel", DamageDice::with_bonus(1, 6, 1), "claw hammer") }),
+        ("screwdriver", ItemTemplate { base_value: 6, category: Some("tool"),
+                ..misc(0.2, Some(Texture::Smooth), Some("steel"), "Phillips screwdriver") }),
+        ("multi-tool", ItemTemplate { base_value: 40, category: Some("tool"),
+                ..misc(0.3, Some(Texture::Smooth), Some("steel"), "leatherman folding multi-tool") }),
+        ("flashlight", ItemTemplate { base_value: 15, category: Some("tool"),
+                ..misc(0.3, Some(Texture::Smooth), Some("plastic"), "battery LED flashlight") }),
+        ("rope",       ItemTemplate { base_value: 8, category: Some("tool"),
+                ..misc(1.5, Some(Texture::Coarse), Some("cotton"), "30 feet of climbing rope") }),
+        ("duct tape",  ItemTemplate { base_value: 4, category: Some("tool"),
+                ..misc(0.4, Some(Texture::Sticky), Some("plastic"), "roll of grey duct tape") }),
+        ("zip ties",   ItemTemplate { base_value: 3, category: Some("tool"),
+                ..misc(0.05, Some(Texture::Smooth), Some("plastic"), "bag of zip ties") }),
+        ("crowbar",    ItemTemplate { base_value: 18, category: Some("tool"),
+                ..weapon(2.0, Texture::Polished, "iron", DamageDice::with_bonus(1, 6, 1), "iron pry bar") }),
+        ("bolt cutters", ItemTemplate { base_value: 30, category: Some("tool"),
+                ..misc(2.5, Some(Texture::Polished), Some("steel"), "long-handled bolt cutters") }),
+
+        // ─── medicine ─────────────────────────────────────────────
+        ("bandage",        ItemTemplate { base_value: 5, category: Some("medicine"),
+                ..misc(0.1, Some(Texture::Soft), Some("cotton"), "rolled gauze bandage") }),
+        ("painkillers",    ItemTemplate { base_value: 8, category: Some("medicine"),
+                ..misc(0.05, None, Some("plastic"), "bottle of acetaminophen") }),
+        ("first aid kit",  ItemTemplate { base_value: 35, category: Some("medicine"),
+                ..misc(0.8, None, Some("plastic"), "boxed first aid kit") }),
+        ("syringe",        ItemTemplate { base_value: 10, category: Some("medicine"),
+                ..misc(0.02, Some(Texture::Sharp), Some("plastic"), "single-use hypodermic syringe") }),
+        ("anesthetic",     ItemTemplate { base_value: 25, category: Some("medicine"),
+                ..misc(0.1, None, Some("plastic"), "vial of clear sedative") }),
+        ("epinephrine",    ItemTemplate { base_value: 50, category: Some("medicine"),
+                ..misc(0.05, None, Some("plastic"), "EpiPen auto-injector") }),
+        ("antibiotic",     ItemTemplate { base_value: 18, category: Some("medicine"),
+                ..misc(0.05, None, Some("plastic"), "course of amoxicillin") }),
+
+        // ─── currency ─────────────────────────────────────────────
+        ("dollar bill",   ItemTemplate { base_value: 1, category: Some("currency"),
+                ..misc(0.001, Some(Texture::Soft), Some("paper"), "$1 bill") }),
+        ("$20 bill",      ItemTemplate { base_value: 20, category: Some("currency"),
+                ..misc(0.001, Some(Texture::Soft), Some("paper"), "$20 bill") }),
+        ("$100 bill",     ItemTemplate { base_value: 100, category: Some("currency"),
+                ..misc(0.001, Some(Texture::Soft), Some("paper"), "$100 bill") }),
+        ("stack of bills", ItemTemplate { base_value: 1000, category: Some("currency"),
+                ..misc(0.5, Some(Texture::Soft), Some("paper"), "banded stack of $20s") }),
+        ("gold coin",     ItemTemplate { base_value: 50, category: Some("currency"),
+                ..misc(0.01, Some(Texture::Polished), Some("steel"), "old gold coin") }),
+        ("wallet",        ItemTemplate { base_value: 15, category: Some("currency"),
+                ..misc(0.2, Some(Texture::Rough), Some("leather"), "leather billfold wallet") }),
+        ("coin purse",    ItemTemplate { base_value: 10, category: Some("currency"),
+                ..misc(0.3, Some(Texture::Soft), Some("leather"), "drawstring leather purse") }),
+
+        // ─── drinks ───────────────────────────────────────────────
+        ("beer",          ItemTemplate { base_value: 4, category: Some("drink"),
+                ..misc(0.5, Some(Texture::Smooth), Some("glass"), "amber bottle of lager") }),
+        ("wine bottle",   ItemTemplate { base_value: 15, category: Some("drink"),
+                ..misc(1.2, Some(Texture::Smooth), Some("glass"), "corked bottle of red wine") }),
+        ("whiskey",       ItemTemplate { base_value: 30, category: Some("drink"),
+                ..misc(0.9, Some(Texture::Smooth), Some("glass"), "bottle of single-malt whiskey") }),
+        ("coffee mug",    ItemTemplate { base_value: 3, category: Some("drink"),
+                ..misc(0.4, Some(Texture::Smooth), Some("ceramic"), "ceramic mug of black coffee") }),
+        ("water bottle",  ItemTemplate { base_value: 1, category: Some("drink"),
+                ..misc(0.5, Some(Texture::Smooth), Some("plastic"), "16oz bottle of water") }),
+
+        // ─── documents / books ────────────────────────────────────
+        ("ID card",       ItemTemplate { base_value: 50, category: Some("document"),
+                ..misc(0.005, Some(Texture::Smooth), Some("plastic"), "state-issued ID card") }),
+        ("passport",      ItemTemplate { base_value: 80, category: Some("document"),
+                ..misc(0.05, Some(Texture::Smooth), Some("paper"), "national passport") }),
+        ("contract",      ItemTemplate { base_value: 0, category: Some("document"),
+                ..misc(0.01, Some(Texture::Smooth), Some("paper"), "stapled stack of contract paper") }),
+        ("notebook",      ItemTemplate { base_value: 5, category: Some("document"),
+                ..misc(0.2, Some(Texture::Smooth), Some("paper"), "spiral-bound notebook") }),
+        ("hardcover novel", ItemTemplate { base_value: 12, category: Some("book"),
+                ..misc(0.6, Some(Texture::Smooth), Some("paper"), "hardcover novel") }),
+        ("paperback book", ItemTemplate { base_value: 6, category: Some("book"),
+                ..misc(0.3, Some(Texture::Smooth), Some("paper"), "paperback novel") }),
+
+        // ─── extra mêlée ──────────────────────────────────────────
+        ("longsword",
+            ItemTemplate { quality: Some(Quality::Fine), base_value: 250, two_handed: false,
+                ..weapon(1.4, Texture::Polished, "steel",
+                    DamageDice::with_bonus(1, 8, 2), "well-balanced steel longsword") }),
+        ("greatsword",
+            ItemTemplate { quality: Some(Quality::Masterwork), base_value: 600, two_handed: true,
+                ..weapon(3.0, Texture::Polished, "steel",
+                    DamageDice::with_bonus(2, 6, 2), "two-handed greatsword") }),
+        ("dagger",
+            ItemTemplate { base_value: 20,
+                ..weapon(0.3, Texture::Sharp, "steel",
+                    DamageDice::with_bonus(1, 4, 1), "balanced throwing dagger") }),
+        ("axe",
+            ItemTemplate { base_value: 60,
+                ..weapon(2.0, Texture::Sharp, "steel",
+                    DamageDice::with_bonus(1, 8, 1), "single-headed felling axe") }),
+        ("machete",
+            ItemTemplate { base_value: 35,
+                ..weapon(1.2, Texture::Sharp, "steel",
+                    DamageDice::with_bonus(1, 6, 1), "wide-blade machete") }),
+
+        // ─── extra clothing ───────────────────────────────────────
+        ("dress",
+            ItemTemplate { base_value: 80, quality: Some(Quality::Fine), style: Some(Style::Modern),
+                ..clothing(0.4, Texture::Soft, Torso, "silk", 0, "cocktail dress") }),
+        ("suit jacket",
+            ItemTemplate { base_value: 200, quality: Some(Quality::Fine),
+                ..clothing(0.9, Texture::Smooth, Torso, "wool", 1, "single-breasted suit jacket") }),
+        ("trench coat",
+            ItemTemplate { base_value: 150,
+                ..clothing(1.5, Texture::Rough, Torso, "leather", 1, "long trench coat") }),
+        ("scrubs",
+            ItemTemplate { base_value: 30,
+                ..clothing(0.4, Texture::Soft, Torso, "cotton", 0, "hospital scrubs") }),
+        ("uniform shirt",
+            ItemTemplate { base_value: 35,
+                ..clothing(0.4, Texture::Soft, Torso, "cotton", 0, "professional uniform shirt") }),
+        ("balaclava",
+            ItemTemplate { base_value: 8,
+                ..clothing(0.1, Texture::Soft, Head, "wool", 0, "knit ski mask") }),
+        ("sunglasses",
+            ItemTemplate { base_value: 25,
+                ..clothing(0.05, Texture::Smooth, Head, "plastic", 0, "aviator sunglasses") }),
+        ("backpack tactical",
+            ItemTemplate { base_value: 60,
+                ..clothing(1.0, Texture::Rough, Back, "polyester", 0, "tactical molle backpack") }),
         ("leather boots",     clothing(0.9, Texture::Rough, Feet,  "leather", 0,  "ankle-high boots")),
         ("rubber boots",      clothing(0.9, Texture::Rough, Feet,  "rubber",  0,  "high-grip rubber boots")),
         ("hardhat",           clothing(0.4, Texture::Smooth, Head, "rubber",  1,  "construction safety helmet")),
@@ -951,6 +1201,46 @@ fn populate_roles(lib: &mut Library) {
         ("market_shopper", role("shopper", "humanoid", 60, Some("crowd"), &["cotton t-shirt", "leather boots"], None, "for the Indian-market thief scenario — wandering background")),
         ("freshman",      role("freshman", "humanoid", 60, Some("freshman"), &["hoodie", "rubber boots"], None, "for the cafeteria food-fight scenario")),
         ("senior",        role("senior", "humanoid", 70, Some("senior"), &["leather jacket", "leather boots"], None, "for the cafeteria food-fight scenario")),
+
+        // ── new humanoids ───────────────────────────────────────
+        ("doctor",       role("doctor", "humanoid", 75, Some("medical"), &["scrubs", "leather boots", "first aid kit"], Some(Stats { str_: 10, dex: 12, con: 12, int: 16, wis: 14, cha: 13 }), "MD — heals patients")),
+        ("nurse",        role("nurse", "humanoid", 70, Some("medical"), &["scrubs", "rubber boots", "syringe"], Some(Stats { str_: 11, dex: 13, con: 13, int: 13, wis: 14, cha: 14 }), "RN — first responder")),
+        ("paramedic",    role("paramedic", "humanoid", 80, Some("medical"), &["uniform shirt", "leather boots", "first aid kit"], Some(Stats { str_: 13, dex: 13, con: 14, int: 13, wis: 13, cha: 12 }), "EMT — field rescue")),
+        ("chef",         role("chef", "humanoid", 75, Some("staff"), &["uniform shirt", "rubber boots", "kitchen knife"], Some(Stats { str_: 12, dex: 14, con: 12, int: 12, wis: 13, cha: 11 }), "head chef")),
+        ("waiter",       role("waiter", "humanoid", 60, Some("staff"), &["uniform shirt", "leather boots"], Some(Stats { str_: 10, dex: 14, con: 11, int: 11, wis: 12, cha: 14 }), "waiter / server")),
+        ("bartender",    role("bartender", "humanoid", 70, Some("staff"), &["uniform shirt", "leather boots"], Some(Stats { str_: 12, dex: 13, con: 12, int: 12, wis: 13, cha: 15 }), "bar manager")),
+        ("priest",       role("priest", "humanoid", 65, Some("clergy"), &["dress", "leather boots"], Some(Stats { str_: 10, dex: 9, con: 12, int: 14, wis: 16, cha: 14 }), "parish priest")),
+        ("judge",        role("judge", "humanoid", 60, Some("court"), &["dress", "leather boots"], Some(Stats { str_: 9, dex: 9, con: 11, int: 16, wis: 16, cha: 14 }), "presiding judge")),
+        ("professor",    role("professor", "humanoid", 60, Some("academy"), &["suit jacket", "leather boots", "hardcover novel"], Some(Stats { str_: 9, dex: 10, con: 11, int: 17, wis: 15, cha: 13 }), "tenured professor")),
+        ("firefighter",  role("firefighter", "humanoid", 110, Some("rescue"), &["uniform shirt", "leather boots", "axe"], Some(Stats::brute()), "smoke-eater with an axe")),
+        ("police_officer", role("police", "humanoid", 90, Some("police"), &["uniform shirt", "leather boots", "9mm pistol", "9mm round", "9mm round", "9mm round"], Some(Stats { str_: 13, dex: 13, con: 13, int: 11, wis: 13, cha: 11 }), "uniformed officer with sidearm")),
+        ("detective",    role("detective", "humanoid", 80, Some("police"), &["trench coat", "leather boots", "revolver", "9mm round", "9mm round"], Some(Stats { str_: 12, dex: 13, con: 12, int: 14, wis: 14, cha: 13 }), "plainclothes detective")),
+        ("swat",         role("swat", "humanoid", 130, Some("police"), &["kevlar vest", "leather boots", "shotgun", "12-gauge shell", "12-gauge shell", "12-gauge shell"], Some(Stats::brute()), "tactical officer")),
+        ("teller",       role("teller", "humanoid", 60, Some("staff"), &["suit jacket", "leather boots"], Some(Stats::citizen()), "bank teller")),
+        ("security_guard", role("security_guard", "humanoid", 90, Some("security"), &["uniform shirt", "leather boots", "9mm pistol", "9mm round", "9mm round"], Some(Stats { str_: 13, dex: 12, con: 13, int: 10, wis: 12, cha: 10 }), "private security with a sidearm")),
+        ("janitor",      role("janitor", "humanoid", 60, Some("staff"), &["uniform shirt", "rubber boots"], None, "facilities janitor")),
+        ("accountant",   role("accountant", "humanoid", 55, Some("office"), &["suit jacket", "leather boots"], None, "office accountant")),
+        ("artist",       role("artist", "humanoid", 60, Some("crowd"), &["dress", "leather boots"], None, "studio painter")),
+        ("musician",     role("musician", "humanoid", 60, Some("crowd"), &["hoodie", "leather boots"], None, "street / lounge musician")),
+        ("athlete",      role("athlete", "humanoid", 100, Some("crowd"), &["cotton t-shirt", "rubber boots"], Some(Stats { str_: 15, dex: 15, con: 15, int: 10, wis: 11, cha: 12 }), "trained athlete")),
+        ("nurse_practitioner", role("np", "humanoid", 75, Some("medical"), &["scrubs", "leather boots", "first aid kit", "epinephrine"], Some(Stats { str_: 11, dex: 13, con: 13, int: 15, wis: 15, cha: 14 }), "advanced-practice RN")),
+        ("vagrant",      role("vagrant", "humanoid", 50, Some("crowd"), &["wool shirt", "rubber boots"], None, "homeless wanderer")),
+        ("tourist",      role("tourist", "humanoid", 60, Some("crowd"), &["cotton t-shirt", "leather boots", "passport"], None, "passport-carrying tourist")),
+
+        // ── animals ─────────────────────────────────────────────
+        ("cat",          role("cat", "quadruped", 30, Some("feral"), &[], Some(Stats { str_: 7, dex: 17, con: 10, int: 5, wis: 12, cha: 7 }), "house cat")),
+        ("deer",         role("deer", "quadruped", 60, Some("wild"), &[], Some(Stats { str_: 13, dex: 15, con: 13, int: 4, wis: 14, cha: 11 }), "white-tailed deer")),
+        ("horse",        role("horse", "quadruped", 130, Some("livestock"), &[], Some(Stats { str_: 18, dex: 12, con: 15, int: 5, wis: 11, cha: 9 }), "draft horse")),
+        ("cow",          role("cow", "quadruped", 100, Some("livestock"), &[], Some(Stats { str_: 16, dex: 8, con: 14, int: 4, wis: 8, cha: 6 }), "dairy cow")),
+        ("pig",          role("pig", "quadruped", 80, Some("livestock"), &[], Some(Stats { str_: 14, dex: 10, con: 14, int: 7, wis: 9, cha: 7 }), "farm hog")),
+        ("bear",         role("bear", "quadruped", 220, Some("wild"), &[], Some(Stats { str_: 20, dex: 11, con: 18, int: 5, wis: 13, cha: 6 }), "black bear")),
+        ("wolf",         role("wolf", "quadruped", 90, Some("wild"), &[], Some(Stats { str_: 14, dex: 14, con: 14, int: 6, wis: 14, cha: 7 }), "grey wolf")),
+        ("eagle",        role("eagle", "bird", 30, Some("wild"), &[], Some(Stats { str_: 7, dex: 17, con: 10, int: 4, wis: 14, cha: 7 }), "golden eagle")),
+        ("crow",         role("crow", "bird", 12, Some("wild"), &[], Some(Stats { str_: 5, dex: 16, con: 8, int: 6, wis: 11, cha: 5 }), "carrion crow")),
+        ("pigeon",       role("pigeon", "bird", 8, Some("crowd"), &[], Some(Stats { str_: 4, dex: 14, con: 7, int: 3, wis: 9, cha: 5 }), "city pigeon")),
+        ("snake",        role("snake", "snake", 30, Some("wild"), &[], Some(Stats { str_: 9, dex: 16, con: 10, int: 3, wis: 12, cha: 5 }), "rat snake")),
+        ("rattlesnake",  role("rattlesnake", "snake", 35, Some("wild"), &[], Some(Stats { str_: 9, dex: 16, con: 11, int: 3, wis: 13, cha: 5 }), "venomous rattler")),
+        ("rat",          role("rat", "quadruped", 8, Some("vermin"), &[], Some(Stats { str_: 4, dex: 15, con: 8, int: 3, wis: 10, cha: 4 }), "city rat")),
     ];
 
     for (name, tmpl) in entries {
@@ -1299,6 +1589,146 @@ fn populate_furniture(lib: &mut Library) {
         ("garden gnome", sized(Outdoor, 'g', "ceramic",  (1, 1), "smug little ceramic gnome")),
         ("pool",         sized(Outdoor, '~', "tile",     (5, 3), "in-ground swimming pool")),
         ("hot tub",      sized(Outdoor, '@', "tile",     (2, 2), "outdoor hot tub")),
+
+        // ─── vehicles (as Outdoor furniture for now) ──────────────
+        ("sedan",        sized(Outdoor, 'V', "steel",    (2, 4), "four-door sedan")),
+        ("pickup truck", sized(Outdoor, 'V', "steel",    (2, 4), "Ford pickup truck")),
+        ("motorcycle",   sized(Outdoor, 'v', "steel",    (1, 2), "Harley motorcycle")),
+        ("bicycle",      sized(Outdoor, 'v', "aluminum", (1, 2), "ten-speed bicycle")),
+        ("getaway van",  sized(Outdoor, 'V', "steel",    (2, 4), "unmarked panel van")),
+        ("police cruiser", sized(Outdoor, 'V', "steel",  (2, 4), "marked police cruiser")),
+        ("ambulance",    sized(Outdoor, 'V', "steel",    (2, 5), "EMS ambulance")),
+
+        // ─── public-space ─────────────────────────────────────────
+        ("ATM",
+            FurnitureTemplate {
+                container: Some(ContainerSpec { locked: true, lock_dc: 26 }),
+                quality: Some(Quality::Fine), base_value: 200,
+                ..base(Storage, 'A', "steel", "wall-mounted ATM")
+            }),
+        ("vending machine",
+            FurnitureTemplate {
+                size: (1, 2),
+                container: Some(ContainerSpec { locked: true, lock_dc: 18 }),
+                base_value: 80,
+                ..base(Storage, 'V', "steel", "snack vending machine")
+            }),
+        ("cash register",
+            FurnitureTemplate {
+                container: Some(ContainerSpec { locked: true, lock_dc: 16 }),
+                base_value: 60,
+                ..base(Storage, '$', "steel", "point-of-sale cash register")
+            }),
+        ("bank vault",
+            FurnitureTemplate {
+                size: (3, 3),
+                container: Some(ContainerSpec { locked: true, lock_dc: 30 }),
+                quality: Some(Quality::Masterwork), base_value: 5000,
+                ..base(Storage, 'V', "steel", "armored bank vault")
+            }),
+        ("safety deposit box",
+            FurnitureTemplate {
+                container: Some(ContainerSpec { locked: true, lock_dc: 22 }),
+                base_value: 200,
+                ..base(Storage, 'B', "steel", "wall-bank deposit box")
+            }),
+        ("reception desk", sized(Table, 'd', "oak", (3, 1), "L-shaped reception counter")),
+        ("teller window",  sized(Structure, '|', "marble", (1, 1), "bulletproof teller window")),
+        ("bar counter",    sized(Table, 'b', "oak", (5, 1), "polished oak bar")),
+        ("pool table",     sized(Table, 'p', "wood", (2, 4), "felt-topped pool table")),
+        ("piano",          sized(Decor, 'P', "oak", (3, 2), "upright piano")),
+        ("grand piano",    sized(Decor, 'P', "oak", (3, 4), "concert grand piano")),
+        ("computer",
+            FurnitureTemplate {
+                powered: Some(PoweredSpec {
+                    on: true, source: PowerSource::Mains,
+                    ambient: Some((SoundKind::Other("fan whir".into()), 0.05)),
+                    heat_per_tick: 0.2, label: "desktop PC".into(),
+                }),
+                ..base(Appliance, 'C', "steel", "tower PC + monitor")
+            }),
+        ("printer",
+            FurnitureTemplate {
+                powered: Some(PoweredSpec {
+                    on: false, source: PowerSource::Mains,
+                    ambient: None, heat_per_tick: 0.0, label: "laser printer".into(),
+                }),
+                ..base(Appliance, 'p', "plastic", "office laser printer")
+            }),
+        ("treadmill",
+            FurnitureTemplate {
+                size: (1, 2),
+                powered: Some(PoweredSpec {
+                    on: false, source: PowerSource::Mains,
+                    ambient: None, heat_per_tick: 0.0, label: "treadmill".into(),
+                }),
+                ..base(Appliance, 'T', "steel", "home treadmill")
+            }),
+        ("workbench",
+            FurnitureTemplate {
+                size: (3, 1),
+                container: Some(ContainerSpec { locked: false, lock_dc: 0 }),
+                ..base(Table, 'W', "oak", "garage workbench")
+            }),
+        ("forge",
+            FurnitureTemplate {
+                size: (2, 2),
+                powered: Some(PoweredSpec {
+                    on: true, source: PowerSource::Fire,
+                    ambient: Some((SoundKind::Other("crackle".into()), 0.30)),
+                    heat_per_tick: 12.0, label: "forge".into(),
+                }),
+                ..base(Appliance, 'F', "iron", "blacksmith's forge")
+            }),
+        ("altar",          sized(Decor, 'A', "marble", (3, 2), "carved religious altar")),
+        ("pew",            sized(Seating, '=', "oak", (4, 1), "wooden church pew")),
+        ("hospital bed",
+            FurnitureTemplate {
+                size: (1, 3), base_value: 200,
+                ..base(Bed, 'B', "steel", "adjustable hospital bed")
+            }),
+        ("operating table",
+            FurnitureTemplate {
+                size: (1, 2), base_value: 800,
+                ..base(Bed, 'O', "steel", "stainless operating table")
+            }),
+        ("file rack",      sized(Storage, 'L', "steel", (2, 1), "row of filing racks")),
+        ("water cooler",   sized(Appliance, 'w', "plastic", (1, 1), "office water cooler")),
+        ("stage",          sized(Structure, '_', "wood", (5, 3), "raised stage")),
+        ("microphone",     base(Decor, 'm', "steel", "stand microphone")),
+        ("trash can",      sized(Decor, 'T', "plastic", (1, 1), "city trash can")),
+        ("park bench",     sized(Seating, 'b', "wood", (3, 1), "iron-and-slat park bench")),
+        // ─── trees + outdoors ─────────────────────────────────────
+        ("oak tree",      sized(Outdoor, 'T', "oak", (2, 2), "tall oak tree")),
+        ("pine tree",     sized(Outdoor, 't', "pine", (1, 1), "evergreen pine")),
+        ("birch tree",    sized(Outdoor, 'T', "wood", (1, 1), "white-barked birch")),
+        ("redwood tree",  sized(Outdoor, 'T', "wood", (3, 3), "ancient redwood — three tiles wide")),
+        ("sapling",       sized(Outdoor, 't', "wood", (1, 1), "young sapling")),
+        ("bush",          sized(Outdoor, '&', "wood", (1, 1), "thick brushwood")),
+        ("brush path tile", sized(Outdoor, ',', "dirt", (1, 1), "trampled brush path")),
+        ("rock",          sized(Outdoor, '*', "stone", (1, 1), "moss-covered boulder")),
+        ("log",           sized(Outdoor, '=', "wood", (2, 1), "fallen log")),
+        ("stump",         sized(Outdoor, 'o', "wood", (1, 1), "tree stump")),
+        ("camp fire",
+            FurnitureTemplate {
+                powered: Some(PoweredSpec {
+                    on: true, source: PowerSource::Fire,
+                    ambient: Some((SoundKind::Other("crackle".into()), 0.20)),
+                    heat_per_tick: 8.0, label: "campfire".into(),
+                }),
+                light_lumens: Some(400.0),
+                ..base(Appliance, '*', "wood", "campfire ringed by stones")
+            }),
+
+        ("street lamp",
+            FurnitureTemplate {
+                light_lumens: Some(1500.0),
+                powered: Some(PoweredSpec {
+                    on: true, source: PowerSource::Mains,
+                    ambient: None, heat_per_tick: 0.0, label: "street lamp".into(),
+                }),
+                ..base(Lighting, 'L', "iron", "wrought-iron street lamp")
+            }),
     ];
 
     for (name, tmpl) in entries {

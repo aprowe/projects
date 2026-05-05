@@ -83,6 +83,14 @@ code { font-family: ui-monospace, SFMono-Regular, "SF Mono", monospace; backgrou
     <h3>Mansion home invasion (60&times;45, two floors, colored)</h3>
     <p>Now multi-story DF-style. The pathfinder traverses ramps, the staircase furniture stamps a `RampUp` voxel + Empty-supported tile above, and the replay viewer has a "floor" dropdown so you can scrub between z=0 (ground floor: foyer, kitchen, master suite, family room, kids' wing, guest room) and z=1 (upstairs: two bedrooms above the foyer with the teen and a queen bed full of jewelry). Materials carry RGB color, items carry Quality (Crude → Heirloom) and Style (Victorian, Modern, Art Deco, …), some pieces wear Blemishes (dent, burn mark, sun-faded patch, engraving, patina) and Finishes (glossy, lacquered, distressed). The front door is painted glossy red via a Paint override. Burglars grab priciest known loot first (sorted by Value).</p>
   </a>
+  <a class="replay" href="cabin.html">
+    <h3>Retired killer's cabin (woods + reactive AI + ranged combat)</h3>
+    <p>30&times;30 forest clearing with redwoods, oaks, pines, birches, saplings, bushes, rocks, a fallen log, a stump, a campfire, a brush path winding from a small log cabin to the gravel road. An old man rocks on the porch with a coffee. A van pulls up; three balaclava-wearing assassins approach. The old man's planner is reactive (perception &rarr; decision, no script): when he hears the engine and sees an armed figure, his goal flips from "rocking" to "open the safe / equip / engage". Inside the safe: a shotgun, a 9mm pistol, plenty of ammo, a kevlar vest. Despite his age, his stats (DEX 18, WIS 17) are lethal. Per-cell hover tooltips show what every tile is &mdash; material, kind, hp, value, blemishes.</p>
+  </a>
+  <a class="replay" href="bank.html">
+    <h3>Bank heist (guns + currency + alarms + police response)</h3>
+    <p>40&times;30 bank branch at 09:42. Three robbers in balaclavas burst in through the front, two with 9mm pistols and one with a 12-gauge shotgun. The security guard goes down in three rounds. Tellers see the drawn weapons, raise the alarm, then cower. 18 ticks later two squad cars roar into the parking lot &mdash; the responding officers fan out and engage. The robbers force-open four cash registers (DC 16 strength check), grab stacks of bills, and try to flee to the getaway van under fire. The wall safe (DC 30) and the ATMs (DC 26) are out of their league without proper tools.</p>
+  </a>
   <a class="replay" href="airport.html">
     <h3>Airport infiltration (Hitman-style impersonation)</h3>
     <p>A spy walks through the terminal, swaps into a stolen pilot's uniform, lies past TSA and a boarding agent, and crosses the crew lounge to gate B7. NPCs have <em>local knowledge</em> &mdash; the boarding agent personally knows Captain Hayes' face, so the disguise unravels at the lounge. Same scripted-dialog primitives can later be driven by an LLM.</p>
