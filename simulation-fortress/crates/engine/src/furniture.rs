@@ -307,6 +307,83 @@ pub enum Stair {
     Down,
 }
 
+/// Marker: this furniture can be vaulted/climbed over instead of
+/// blocking the way. The pathfinder treats the tile as walkable
+/// (no wall stamp on spawn) and `physics::footing_check` rolls a
+/// DEX check when an actor steps onto a Climbable tile — failure
+/// applies `StatusKind::Prone` for a tick.
+///
+/// `difficulty` is the DC (default 10): low couches and footstools
+/// 8, twin beds 10, heavy dressers 14, kitchen counters 12.
+#[derive(Component, Copy, Clone, Debug)]
+pub struct Climbable {
+    pub difficulty: i32,
+}
+
+impl Climbable {
+    pub fn easy() -> Self { Self { difficulty: 8 } }
+    pub fn normal() -> Self { Self { difficulty: 10 } }
+    pub fn hard() -> Self { Self { difficulty: 14 } }
+}
+
+/// Marker: this furniture / item can be picked up and hauled
+/// somewhere else. Mass + STR checks decide whether the lift
+/// succeeds and how much it slows the haulier.
+///
+/// `min_strength` is the rolled-strength threshold (STR + d20)
+/// required to lift solo. Heavier pieces need cooperative haulers
+/// (`Task::AssistHaul`).
+#[derive(Component, Copy, Clone, Debug)]
+pub struct Haulable {
+    pub min_strength: i32,
+    /// Soft cap: items that need at least this many haulers to
+    /// move smoothly. 1 = solo, 2 = sofa-class, 3 = piano-class.
+    pub haulers_needed: u8,
+}
+
+impl Haulable {
+    pub fn light() -> Self { Self { min_strength: 8, haulers_needed: 1 } }
+    pub fn medium() -> Self { Self { min_strength: 12, haulers_needed: 1 } }
+    pub fn heavy() -> Self { Self { min_strength: 16, haulers_needed: 2 } }
+    pub fn massive() -> Self { Self { min_strength: 20, haulers_needed: 3 } }
+}
+
+/// Live state: this entity is currently being carried by `actor`.
+/// The `tick_carrying` system keeps the carried item's `Position`
+/// in sync with the carrier's. While this is set, the entity
+/// doesn't stamp a wall in the voxel world (it's a "soft prop"
+/// being toted around).
+#[derive(Component, Copy, Clone, Debug)]
+pub struct Carried {
+    pub by: Entity,
+}
+
+/// Per-tick: every `Carried` entity gets its `Position` snapped to
+/// its carrier's. When the carrier dies (no longer has Position),
+/// the carried entity is dropped where it stood.
+pub fn tick_carrying(world: &mut World) {
+    let pairs: Vec<(Entity, Entity)> = {
+        let mut q = world.query::<(Entity, &Carried)>();
+        q.iter(world).map(|(e, c)| (e, c.by)).collect()
+    };
+    for (item, carrier) in pairs {
+        let new_pos = world.get::<Position>(carrier).map(|p| p.0);
+        match new_pos {
+            Some(p) => {
+                if let Some(mut pos) = world.get_mut::<Position>(item) {
+                    pos.0 = p;
+                } else {
+                    world.entity_mut(item).insert(Position(p));
+                }
+            }
+            None => {
+                // Carrier vanished — drop in place by removing Carried.
+                world.entity_mut(item).remove::<Carried>();
+            }
+        }
+    }
+}
+
 /// Per-tick: every `Powered` entity that is `on` and has an
 /// `ambient_sound` pushes a `SoundEmitted` event from its position.
 /// This makes "the TV is on in the next room" audible to entities

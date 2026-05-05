@@ -124,6 +124,13 @@ pub struct FurnitureTemplate {
     pub painting: Option<PaintingSpec>,
     pub rug: Option<RugSpec>,
     pub light_lumens: Option<f32>,
+    /// If `Some`, the furniture is `Climbable` — actors can step
+    /// over it (instead of around it) at the listed DC.
+    pub climbable: Option<i32>,
+    /// If `Some`, the furniture is `Haulable` — pickable up via
+    /// `Task::Haul` with at least `min_strength` STR; carries
+    /// `haulers_needed` for cooperative lift.
+    pub haulable: Option<(i32, u8)>,
     /// Craftsmanship tier. Defaults to `Quality::Standard`.
     pub quality: Option<Quality>,
     /// Aesthetic style. `Standard` = no modifier in narration.
@@ -581,9 +588,12 @@ pub fn spawn_furniture_template(
     // floor-coverings + lighting + wall art don't block. Open
     // windows / sliding doors don't block either. Staircases get
     // special treatment — RampUp at z and Empty above (so an actor
-    // can climb).
+    // can climb). Climbable furniture also doesn't stamp walls —
+    // the path planner treats them as floors and `footing_check`
+    // rolls a DEX check on entry.
     let window_open = matches!(&template.window, Some(w) if !w.closed);
     let is_staircase = matches!(template_name, "staircase up" | "staircase down");
+    let is_climbable = template.climbable.is_some();
     if is_staircase {
         if let Some(mat) = material_id {
             let mut vw = world.resource_mut::<VoxelWorld>();
@@ -607,7 +617,7 @@ pub fn spawn_furniture_template(
                 }
             }
         }
-    } else if template.kind.blocks_tile() && !window_open {
+    } else if template.kind.blocks_tile() && !window_open && !is_climbable {
         if let Some(mat) = material_id {
             let mut vw = world.resource_mut::<VoxelWorld>();
             let voxel = crate::world::Voxel::wall(mat);
@@ -679,6 +689,31 @@ pub fn spawn_furniture_template(
             .entity_mut(id)
             .insert(Value::from_template(template.base_value, quality, style));
     }
+    if let Some(dc) = template.climbable {
+        world
+            .entity_mut(id)
+            .insert(crate::furniture::Climbable { difficulty: dc });
+    }
+    if let Some((min_str, helpers)) = template.haulable {
+        world.entity_mut(id).insert(crate::furniture::Haulable {
+            min_strength: min_str,
+            haulers_needed: helpers,
+        });
+    }
+    // Auto-compute Mass from material density × footprint area.
+    // (1 kg per tile per density unit; chairs ~5 kg, sofas ~30 kg,
+    // dressers ~80 kg, pianos ~250 kg.)
+    let footprint = (w * d) as f32;
+    let density = template
+        .material
+        .as_ref()
+        .and_then(|m| world.resource::<Library>().materials.get(m).cloned())
+        .map(|m| m.density)
+        .unwrap_or(1.0);
+    let mass_kg = (density * footprint * 12.0).round();
+    world
+        .entity_mut(id)
+        .insert(crate::items::Mass(mass_kg));
     Ok(id)
 }
 
@@ -1264,6 +1299,8 @@ fn populate_furniture(lib: &mut Library) {
             painting: None,
             rug: None,
             light_lumens: None,
+            climbable: None,
+            haulable: None,
             quality: None,
             style: None,
             base_value: 0,
@@ -1294,21 +1331,30 @@ fn populate_furniture(lib: &mut Library) {
         }
     }
 
-    let entries: &[(&str, FurnitureTemplate)] = &[
-        // ─── seating ──────────────────────────────────────────────
-        ("sofa",         sized(Seating, 's', "velvet",  (3, 1), "long upholstered couch — 3 tiles wide")),
-        ("loveseat",     sized(Seating, 's', "velvet",  (2, 1), "small couch for two")),
-        ("armchair",     sized(Seating, 'a', "leather", (1, 1), "single-seat lounge chair")),
-        ("dining chair", sized(Seating, 'h', "oak",     (1, 1), "wooden chair at the dining table")),
-        ("bench",        sized(Seating, 'b', "oak",     (3, 1), "long bench in the foyer")),
-        ("ottoman",      sized(Seating, 'o', "velvet",  (1, 1), "footrest")),
-        ("recliner",     sized(Seating, 'r', "leather", (1, 1), "reclining lounge chair")),
+    fn climbable(mut t: FurnitureTemplate, dc: i32) -> FurnitureTemplate {
+        t.climbable = Some(dc);
+        t
+    }
+    fn haulable(mut t: FurnitureTemplate, min_str: i32, helpers: u8) -> FurnitureTemplate {
+        t.haulable = Some((min_str, helpers));
+        t
+    }
 
-        // ─── beds ─────────────────────────────────────────────────
-        ("king bed",   sized(Bed, 'B', "oak",  (2, 3), "king-size four-poster")),
-        ("queen bed",  sized(Bed, 'B', "oak",  (2, 3), "queen-size bed")),
-        ("twin bed",   sized(Bed, 'b', "pine", (1, 2), "single twin")),
-        ("crib",       sized(Bed, 'c', "pine", (1, 2), "infant crib")),
+    let entries: &[(&str, FurnitureTemplate)] = &[
+        // ─── seating (most are climbable + haulable) ─────────────
+        ("sofa",         haulable(climbable(sized(Seating, 's', "velvet",  (3, 1), "long upholstered couch — 3 tiles wide"), 8), 16, 2)),
+        ("loveseat",     haulable(climbable(sized(Seating, 's', "velvet",  (2, 1), "small couch for two"), 8), 12, 1)),
+        ("armchair",     haulable(climbable(sized(Seating, 'a', "leather", (1, 1), "single-seat lounge chair"), 8), 10, 1)),
+        ("dining chair", haulable(climbable(sized(Seating, 'h', "oak",     (1, 1), "wooden chair at the dining table"), 6), 8, 1)),
+        ("bench",        haulable(climbable(sized(Seating, 'b', "oak",     (3, 1), "long bench in the foyer"), 8), 14, 2)),
+        ("ottoman",      haulable(climbable(sized(Seating, 'o', "velvet",  (1, 1), "footrest"), 6), 8, 1)),
+        ("recliner",     haulable(climbable(sized(Seating, 'r', "leather", (1, 1), "reclining lounge chair"), 9), 12, 1)),
+
+        // ─── beds (climbable, mostly too heavy to haul solo) ─────
+        ("king bed",   haulable(climbable(sized(Bed, 'B', "oak",  (2, 3), "king-size four-poster"), 12), 18, 2)),
+        ("queen bed",  haulable(climbable(sized(Bed, 'B', "oak",  (2, 3), "queen-size bed"), 11), 16, 2)),
+        ("twin bed",   haulable(climbable(sized(Bed, 'b', "pine", (1, 2), "single twin"), 10), 12, 1)),
+        ("crib",       haulable(climbable(sized(Bed, 'c', "pine", (1, 2), "infant crib"), 8), 10, 1)),
 
         // ─── storage ───────────────────────────────────────────────
         ("wardrobe",
@@ -1332,6 +1378,7 @@ fn populate_furniture(lib: &mut Library) {
         ("nightstand",
             FurnitureTemplate {
                 container: Some(ContainerSpec { locked: false, lock_dc: 0 }),
+                haulable: Some((10, 1)),
                 ..base(Storage, 'n', "oak", "bedside nightstand with one drawer")
             }),
         ("bookshelf",
@@ -1360,12 +1407,12 @@ fn populate_furniture(lib: &mut Library) {
                 ..base(Storage, 'f', "steel", "metal filing cabinet")
             }),
 
-        // ─── tables ────────────────────────────────────────────────
-        ("dining table",  sized(Table, 't', "oak",     (2, 4), "long dining table")),
-        ("coffee table",  sized(Table, 'c', "oak",     (2, 1), "low living-room table")),
-        ("desk",          sized(Table, 'd', "oak",     (2, 1), "writing desk")),
-        ("kitchen island", sized(Table, 'i', "granite", (3, 1), "kitchen island with stone top")),
-        ("side table",    sized(Table, 's', "oak",     (1, 1), "small side table")),
+        // ─── tables (haulable; coffee table climbable) ────────────
+        ("dining table",  haulable(sized(Table, 't', "oak",     (2, 4), "long dining table"), 16, 2)),
+        ("coffee table",  haulable(climbable(sized(Table, 'c', "oak", (2, 1), "low living-room table"), 8), 10, 1)),
+        ("desk",          haulable(sized(Table, 'd', "oak",     (2, 1), "writing desk"), 14, 1)),
+        ("kitchen island", haulable(sized(Table, 'i', "granite", (3, 1), "kitchen island with stone top"), 20, 3)),
+        ("side table",    haulable(climbable(sized(Table, 's', "oak", (1, 1), "small side table"), 6), 8, 1)),
 
         // ─── appliances ────────────────────────────────────────────
         ("tv set",

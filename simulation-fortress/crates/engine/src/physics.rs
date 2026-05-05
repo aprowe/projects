@@ -143,7 +143,43 @@ pub fn footing_check(world: &mut World) {
         q.iter(world).map(|(p, c)| (p.0, c.material)).collect()
     };
 
+    // Snapshot Climbable furniture once.
+    let climbables: Vec<(Pos, i32)> = {
+        let mut q = world.query::<(&Position, &crate::furniture::Climbable)>();
+        q.iter(world).map(|(p, c)| (p.0, c.difficulty)).collect()
+    };
+
     for (mover, dest) in moves {
+        // Climbable check: if the destination tile has a Climbable
+        // furniture entity, roll DEX vs its difficulty. Failure
+        // applies Prone for one tick (you stumbled over the couch)
+        // and emits a Slipped event.
+        if let Some(dc) = climbables.iter().find(|(p, _)| *p == dest).map(|(_, d)| *d) {
+            use crate::dice::roll_d20;
+            use crate::stats::Stats;
+            let dex = world.get::<Stats>(mover).map(|s| s.dex_mod()).unwrap_or(0);
+            let roll = {
+                let mut rng = world.resource_mut::<Rng>();
+                roll_d20(&mut rng, dex).total
+            };
+            if roll < dc {
+                world
+                    .resource_mut::<EventLog>()
+                    .push(tick, Event::Slipped {
+                        entity: mover,
+                        hazard: format!("clambering over furniture (rolled {roll} vs DC {dc})"),
+                        prone_ticks: 1,
+                    });
+                crate::status::apply_status(
+                    world,
+                    mover,
+                    crate::status::StatusKind::Prone,
+                    1,
+                    1,
+                );
+            }
+        }
+
         let locomotion = current_locomotion(world, mover);
         let loco_factor = locomotion.slip_factor();
         if loco_factor == 0.0 {

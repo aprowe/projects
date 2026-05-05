@@ -92,6 +92,15 @@ pub enum Task {
     /// Requires `RangedWeapon` + `Ammo` in inventory; consumes one
     /// round; resolves with line-of-fire vs. AC.
     Shoot(Entity),
+    /// Haul a furniture/item to a destination tile. The engine
+    /// resolves it as: walk-to-item → STR check to lift →
+    /// (with `Carried` set) walk-to-target → drop. Heavier pieces
+    /// (`Haulable.haulers_needed > 1`) require additional actors
+    /// running `Task::AssistHaul(item)` adjacent to the lead.
+    Haul(Entity, Pos),
+    /// Help an existing leader haul `item`: walk to the item's
+    /// current tile and stay adjacent. Speed-matches the leader.
+    AssistHaul(Entity),
 }
 
 impl Task {
@@ -105,6 +114,8 @@ impl Task {
             Task::Equip(e) => format!("Equip(#{})", e.index()),
             Task::Throw(item, p) => format!("Throw(#{}, ({}, {}, {}))", item.index(), p.x, p.y, p.z),
             Task::Shoot(e) => format!("Shoot(#{})", e.index()),
+            Task::Haul(item, p) => format!("Haul(#{}, ({}, {}, {}))", item.index(), p.x, p.y, p.z),
+            Task::AssistHaul(item) => format!("AssistHaul(#{})", item.index()),
         }
     }
 }
@@ -253,6 +264,8 @@ fn execute_one(world: &mut World, actor: Entity, task: Task) -> TaskOutcome {
         Task::Equip(item) => execute_equip(world, actor, item),
         Task::Throw(item, target_pos) => execute_throw(world, actor, item, target_pos),
         Task::Shoot(target) => execute_shoot(world, actor, target),
+        Task::Haul(item, drop_pos) => execute_haul(world, actor, item, drop_pos),
+        Task::AssistHaul(item) => execute_assist_haul(world, actor, item),
     }
 }
 
@@ -554,6 +567,213 @@ fn consume_ammo(world: &mut World, actor: Entity) -> bool {
     // Despawn the consumed round.
     world.despawn(item);
     true
+}
+
+/// Lift the item if we're adjacent and strong enough; while
+/// carrying, walk toward `drop_pos`; when we arrive, drop the
+/// item there. The Carried system keeps the item's Position in
+/// sync with ours each tick.
+fn execute_haul(world: &mut World, actor: Entity, item: Entity, drop_pos: Pos) -> TaskOutcome {
+    use crate::furniture::{Carried, Haulable};
+    use crate::items::Mass;
+    use crate::stats::Stats;
+    let actor_pos = match world.get::<Position>(actor) {
+        Some(p) => p.0,
+        None => return TaskOutcome::Failed("no position"),
+    };
+    let already_carried_by_me = world
+        .get::<Carried>(item)
+        .map(|c| c.by == actor)
+        .unwrap_or(false);
+
+    // Step 1: if not yet picked up, walk to the item, then attempt to lift.
+    if !already_carried_by_me {
+        // If someone else is carrying it, fail.
+        if let Some(c) = world.get::<Carried>(item) {
+            if c.by != actor {
+                return TaskOutcome::Failed("already being hauled");
+            }
+        }
+        let item_pos = match world.get::<Position>(item) {
+            Some(p) => p.0,
+            None => return TaskOutcome::Failed("item has no position"),
+        };
+        if actor_pos.chebyshev(item_pos) > 1 {
+            // Walk one step toward the item.
+            let path = {
+                let vw = world.resource::<VoxelWorld>();
+                find_path(vw, actor_pos, item_pos, 4096)
+            };
+            let Some(path) = path else {
+                return TaskOutcome::Failed("can't reach the item");
+            };
+            if path.len() < 2 {
+                return TaskOutcome::Continue;
+            }
+            let next = path[1];
+            if let Some(mut p) = world.get_mut::<Position>(actor) {
+                p.0 = next;
+            }
+            push_event(world, Event::EntityMoved { entity: actor, from: actor_pos, to: next });
+            return TaskOutcome::Continue;
+        }
+        // Adjacent — attempt to lift. Need STR + d20 ≥ haulable.min_strength.
+        let needed = world
+            .get::<Haulable>(item)
+            .map(|h| h.min_strength)
+            .unwrap_or(8);
+        let helpers = count_assist_haulers(world, item, actor);
+        let actor_str = world.get::<Stats>(actor).map(|s| s.str_mod()).unwrap_or(0);
+        // Each helper contributes their STR mod (rough cooperative lift).
+        let helper_str = sum_assist_strength(world, item, actor);
+        let roll = {
+            use crate::dice::roll_d20;
+            let mut rng = world.resource_mut::<crate::rng::Rng>();
+            roll_d20(&mut rng, actor_str + helper_str).total
+        };
+        if roll < needed {
+            push_event(
+                world,
+                Event::Note(format!(
+                    "{} strains to lift the item but it doesn't budge ({roll} vs {needed}).",
+                    label_for(world, actor),
+                )),
+            );
+            return TaskOutcome::Failed("too heavy");
+        }
+        // Mass also gates: anything > 200 kg solo is impossible.
+        let mass = world.get::<Mass>(item).map(|m| m.0).unwrap_or(10.0);
+        let haulers = 1.0 + helpers as f32;
+        if mass / haulers > 200.0 {
+            return TaskOutcome::Failed("too heavy even together");
+        }
+        // Lift!
+        world.entity_mut(item).insert(Carried { by: actor });
+        let label_actor = label_for(world, actor);
+        let label_item = label_for(world, item);
+        push_event(
+            world,
+            Event::Note(format!("{label_actor} hoists the {label_item}.")),
+        );
+        return TaskOutcome::Continue;
+    }
+
+    // Step 2: walking with the item. Stop at drop_pos.
+    if actor_pos == drop_pos {
+        // Drop in place.
+        world.entity_mut(item).remove::<Carried>();
+        // Position stays where we put it (already synced).
+        let label_actor = label_for(world, actor);
+        let label_item = label_for(world, item);
+        push_event(
+            world,
+            Event::Note(format!("{label_actor} sets the {label_item} down.")),
+        );
+        return TaskOutcome::Complete;
+    }
+    let path = {
+        let vw = world.resource::<VoxelWorld>();
+        find_path(vw, actor_pos, drop_pos, 4096)
+    };
+    let Some(path) = path else {
+        return TaskOutcome::Failed("can't carry to the drop point");
+    };
+    if path.len() < 2 {
+        return TaskOutcome::Continue;
+    }
+    let next = path[1];
+    if let Some(mut p) = world.get_mut::<Position>(actor) {
+        p.0 = next;
+    }
+    push_event(world, Event::EntityMoved { entity: actor, from: actor_pos, to: next });
+    TaskOutcome::Continue
+}
+
+fn execute_assist_haul(world: &mut World, actor: Entity, item: Entity) -> TaskOutcome {
+    let actor_pos = match world.get::<Position>(actor) {
+        Some(p) => p.0,
+        None => return TaskOutcome::Failed("no position"),
+    };
+    let item_pos = match world.get::<Position>(item) {
+        Some(p) => p.0,
+        None => return TaskOutcome::Failed("item has no position"),
+    };
+    if actor_pos.chebyshev(item_pos) <= 1 {
+        // Already adjacent — keep helping, no-op for this tick.
+        return TaskOutcome::Continue;
+    }
+    let path = {
+        let vw = world.resource::<VoxelWorld>();
+        find_path(vw, actor_pos, item_pos, 4096)
+    };
+    let Some(path) = path else {
+        return TaskOutcome::Failed("can't reach the lead haulier");
+    };
+    if path.len() < 2 {
+        return TaskOutcome::Continue;
+    }
+    let next = path[1];
+    if let Some(mut p) = world.get_mut::<Position>(actor) {
+        p.0 = next;
+    }
+    push_event(world, Event::EntityMoved { entity: actor, from: actor_pos, to: next });
+    TaskOutcome::Continue
+}
+
+/// How many other actors currently have `Task::AssistHaul(item)`
+/// queued at the front of their queue, are alive, and adjacent to
+/// the item.
+fn count_assist_haulers(world: &mut World, item: Entity, lead: Entity) -> u8 {
+    let item_pos = match world.get::<Position>(item) {
+        Some(p) => p.0,
+        None => return 0,
+    };
+    let mut count = 0u8;
+    let mut q = world.query::<(Entity, &Position, &TaskQueue)>();
+    for (e, p, queue) in q.iter(world) {
+        if e == lead {
+            continue;
+        }
+        if p.0.chebyshev(item_pos) > 1 {
+            continue;
+        }
+        match queue.0.front() {
+            Some(Task::AssistHaul(t)) if *t == item => count = count.saturating_add(1),
+            _ => {}
+        }
+    }
+    count
+}
+
+fn sum_assist_strength(world: &mut World, item: Entity, lead: Entity) -> i32 {
+    use crate::stats::Stats;
+    let item_pos = match world.get::<Position>(item) {
+        Some(p) => p.0,
+        None => return 0,
+    };
+    let mut total = 0i32;
+    let helpers: Vec<Entity> = {
+        let mut q = world.query::<(Entity, &Position, &TaskQueue)>();
+        q.iter(world)
+            .filter(|(e, p, queue)| {
+                *e != lead
+                    && p.0.chebyshev(item_pos) <= 1
+                    && matches!(queue.0.front(), Some(Task::AssistHaul(t)) if *t == item)
+            })
+            .map(|(e, _, _)| e)
+            .collect()
+    };
+    for h in helpers {
+        total += world.get::<Stats>(h).map(|s| s.str_mod()).unwrap_or(0);
+    }
+    total
+}
+
+fn label_for(world: &World, entity: Entity) -> String {
+    match world.get::<crate::components::Kind>(entity) {
+        Some(k) => format!("{}#{}", k.0, entity.index()),
+        None => format!("entity#{}", entity.index()),
+    }
 }
 
 fn chebyshev(a: Pos, b: Pos) -> i32 {

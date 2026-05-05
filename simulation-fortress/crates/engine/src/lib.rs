@@ -52,8 +52,9 @@ pub use dialog::{
 };
 pub use door::{door_at, door_voxel_sync, Door, DoorState};
 pub use furniture::{
-    furniture_emit_system, Container, Furniture, FurnitureKind, LightSource, Painting,
-    PowerSource, Powered, Rug, Stair, Window, WindowState,
+    furniture_emit_system, tick_carrying, Carried, Climbable, Container, Furniture,
+    FurnitureKind, Haulable, LightSource, Painting, PowerSource, Powered, Rug, Stair, Window,
+    WindowState,
 };
 pub use inject::{apply_action, apply_json, Action};
 pub use library::{
