@@ -108,6 +108,38 @@ pub enum Event {
         kind: SoundKind,
         intensity: f32,
     },
+    /// A swing that didn't land. D&D-style: attack roll didn't meet AC.
+    AttackMissed {
+        attacker: Entity,
+        target: Entity,
+        attack_roll: i32,
+        target_ac: i32,
+        weapon: String,
+    },
+    /// Natural 20 — emitted alongside the resulting `EntityAttacked`
+    /// + `BodyPartWounded`.
+    CriticalHit {
+        attacker: Entity,
+        target: Entity,
+        weapon: String,
+    },
+    /// A creature attempted a manipulation/strength check on an
+    /// object (door, lock, lid) and the result was determined.
+    AbilityCheck {
+        actor: Entity,
+        kind: String,        // "manipulation", "strength", ...
+        target: String,      // "the front door", "the dresser drawer"
+        roll: i32,
+        dc: i32,
+        success: bool,
+        impossible: bool,
+    },
+    /// A door changed state (opened, slammed, lockpicked, kicked in).
+    DoorStateChanged {
+        door: Entity,
+        new_state: String,
+        cause: String,
+    },
 }
 
 #[derive(Resource, Default)]
@@ -271,6 +303,69 @@ pub fn narrate(event: &Event, world: &World) -> String {
         ),
         Event::Terrified { entity } => {
             format!("{} is wide-eyed with terror.", label(*entity, world))
+        }
+        Event::AttackMissed {
+            attacker,
+            target,
+            attack_roll,
+            target_ac,
+            weapon,
+        } => format!(
+            "{} swings the {} at {} — rolled {} vs AC {}, miss.",
+            label(*attacker, world),
+            weapon,
+            label(*target, world),
+            attack_roll,
+            target_ac,
+        ),
+        Event::CriticalHit {
+            attacker,
+            target,
+            weapon,
+        } => format!(
+            "Natural 20! {} lands a critical blow on {} with the {}.",
+            label(*attacker, world),
+            label(*target, world),
+            weapon,
+        ),
+        Event::AbilityCheck {
+            actor,
+            kind,
+            target,
+            roll,
+            dc,
+            success,
+            impossible,
+        } => {
+            if *impossible {
+                format!(
+                    "{} tries to {} {} but can't — no working hands.",
+                    label(*actor, world),
+                    kind,
+                    target,
+                )
+            } else if *success {
+                format!(
+                    "{} {} {} (rolled {} vs DC {} — success).",
+                    label(*actor, world),
+                    kind,
+                    target,
+                    roll,
+                    dc,
+                )
+            } else {
+                format!(
+                    "{} fumbles trying to {} {} (rolled {} vs DC {} — failure).",
+                    label(*actor, world),
+                    kind,
+                    target,
+                    roll,
+                    dc,
+                )
+            }
+        }
+        Event::DoorStateChanged { door: _, new_state, cause } => {
+            format!("A door is now {new_state} ({cause}).")
         }
         Event::SoundEmitted {
             kind,

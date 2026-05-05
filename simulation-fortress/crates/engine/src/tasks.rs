@@ -351,6 +351,19 @@ fn execute_use(world: &mut World, actor: Entity, target: Entity) -> TaskOutcome 
 }
 
 fn execute_pickup(world: &mut World, actor: Entity, item: Entity) -> TaskOutcome {
+    let actor_pos = match world.get::<Position>(actor) {
+        Some(p) => p.0,
+        None => return TaskOutcome::Failed("no position"),
+    };
+    // The item must still be on the floor (have a Position) and the
+    // actor must be on the same tile or adjacent.
+    let item_pos = match world.get::<Position>(item).map(|p| p.0) {
+        Some(p) => p,
+        None => return TaskOutcome::Failed("item not on the floor"),
+    };
+    if actor_pos.chebyshev(item_pos) > 1 {
+        return TaskOutcome::Failed("not close enough to pick up");
+    }
     give_item(world, actor, item);
     TaskOutcome::Complete
 }

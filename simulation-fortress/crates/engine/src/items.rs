@@ -64,6 +64,34 @@ pub struct ThermalConductivity(pub f32);
 #[derive(Component, Copy, Clone, Debug)]
 pub struct ElectricalConductivity(pub f32);
 
+/// Dice rolled when the item lands a hit. Standard D&D notation:
+/// `count`d`sides` + `bonus`. Default fist (no DamageDice on item)
+/// is 1d4 + 0 in `combat::resolve_attack`.
+#[derive(Component, Copy, Clone, Debug)]
+pub struct DamageDice {
+    pub count: u8,
+    pub sides: u8,
+    pub bonus: i32,
+}
+
+impl DamageDice {
+    pub const fn new(count: u8, sides: u8) -> Self {
+        Self {
+            count,
+            sides,
+            bonus: 0,
+        }
+    }
+    pub const fn with_bonus(count: u8, sides: u8, bonus: i32) -> Self {
+        Self { count, sides, bonus }
+    }
+}
+
+/// Bonus to the wearer's Armor Class when this item is worn (or the
+/// flat AC when used as a shield, etc). Sum across all worn items.
+#[derive(Component, Copy, Clone, Debug)]
+pub struct ArmorBonus(pub i32);
+
 /// How the item feels to touch.
 #[derive(Component, Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum Texture {

@@ -24,9 +24,11 @@ use crate::anatomy::{
 };
 use crate::components::Position;
 use crate::items::{
-    equip_item as engine_equip, give_item, BodySlot, ElectricalConductivity, Item, ItemMaterial,
-    ItemName, Mass, Temperature, Texture, ThermalConductivity, Wearable,
+    equip_item as engine_equip, give_item, ArmorBonus, BodySlot, DamageDice,
+    ElectricalConductivity, Item, ItemMaterial, ItemName, Mass, Temperature, Texture,
+    ThermalConductivity, Wearable,
 };
+use crate::stats::Stats;
 use crate::tasks::{Goal, TaskQueue};
 use crate::world::{Material, MaterialId, Pos, VoxelWorld};
 
@@ -43,6 +45,11 @@ pub struct ItemTemplate {
     /// material in the active `VoxelWorld` if not already present,
     /// then attaches `ItemMaterial(id)` to the spawned entity.
     pub material: Option<String>,
+    /// Damage dice when the item is used as a weapon. None = no
+    /// `DamageDice` component (combat falls back to fist 1d3).
+    pub damage_dice: Option<DamageDice>,
+    /// AC bonus when worn. None = no `ArmorBonus` component.
+    pub armor_bonus: Option<i32>,
     pub description: String,
 }
 
@@ -58,6 +65,9 @@ pub struct RoleTemplate {
     /// Library item-template keys to auto-equip on spawn.
     pub equipment: Vec<String>,
     pub description: String,
+    /// D&D-style ability scores. Defaults to `Stats::citizen()` when
+    /// `None`.
+    pub stats: Option<Stats>,
 }
 
 #[derive(Resource)]
@@ -263,6 +273,12 @@ pub fn spawn_item_template(
         if let Some(mat) = material_id {
             e.insert(ItemMaterial(mat));
         }
+        if let Some(dice) = template.damage_dice {
+            e.insert(dice);
+        }
+        if let Some(bonus) = template.armor_bonus {
+            e.insert(ArmorBonus(bonus));
+        }
         if opts.equip_on.is_none() && opts.give_to.is_none() {
             if let Some(p) = opts.at {
                 e.insert(Position(p));
@@ -326,10 +342,12 @@ pub fn spawn_role_template(
     };
     apply_body_plan(world, entity, &plan);
 
+    let stats = template.stats.unwrap_or_else(Stats::citizen);
     world
         .entity_mut(entity)
         .insert(TaskQueue::default())
-        .insert(Goal::default());
+        .insert(Goal::default())
+        .insert(stats);
 
     for item_name in &template.equipment {
         let item = spawn_item_template(world, item_name, ItemSpawnOpts::default())?;
@@ -411,46 +429,126 @@ fn populate_body_plans(lib: &mut Library) {
 
 fn populate_items(lib: &mut Library) {
     use BodySlot::*;
-    let it = |mass: f32,
-              temperature: f32,
-              tc: Option<f32>,
-              ec: Option<f32>,
-              texture: Option<Texture>,
-              wearable: Option<BodySlot>,
-              material: Option<&str>,
-              desc: &str|
-     -> ItemTemplate {
+
+    fn weapon(
+        mass: f32,
+        texture: Texture,
+        material: &str,
+        dice: DamageDice,
+        desc: &str,
+    ) -> ItemTemplate {
         ItemTemplate {
             mass,
-            temperature,
-            thermal_conductivity: tc,
-            electrical_conductivity: ec,
-            texture,
-            wearable,
-            material: material.map(|s| s.into()),
+            temperature: 20.0,
+            thermal_conductivity: None,
+            electrical_conductivity: None,
+            texture: Some(texture),
+            wearable: Some(MainHand),
+            material: Some(material.into()),
+            damage_dice: Some(dice),
+            armor_bonus: None,
             description: desc.into(),
         }
-    };
+    }
+
+    fn clothing(
+        mass: f32,
+        texture: Texture,
+        slot: BodySlot,
+        material: &str,
+        ac: i32,
+        desc: &str,
+    ) -> ItemTemplate {
+        ItemTemplate {
+            mass,
+            temperature: 28.0,
+            thermal_conductivity: None,
+            electrical_conductivity: None,
+            texture: Some(texture),
+            wearable: Some(slot),
+            material: Some(material.into()),
+            damage_dice: None,
+            armor_bonus: if ac == 0 { None } else { Some(ac) },
+            description: desc.into(),
+        }
+    }
+
+    fn misc(
+        mass: f32,
+        texture: Option<Texture>,
+        material: Option<&str>,
+        desc: &str,
+    ) -> ItemTemplate {
+        ItemTemplate {
+            mass,
+            temperature: 20.0,
+            thermal_conductivity: None,
+            electrical_conductivity: None,
+            texture,
+            wearable: None,
+            material: material.map(|s| s.into()),
+            damage_dice: None,
+            armor_bonus: None,
+            description: desc.into(),
+        }
+    }
 
     let entries: &[(&str, ItemTemplate)] = &[
-        // weapons
-        ("steel crowbar", it(2.5, 20.0, Some(50.0), Some(1.0e7), Some(Texture::Polished), Some(MainHand), Some("steel"), "heavy steel pry bar — blunt impact, can punch through doors")),
-        ("kitchen knife", it(0.3, 20.0, Some(50.0), Some(1.0e7), Some(Texture::Sharp), Some(MainHand), Some("steel"), "sharp narrow blade — clean cuts")),
-        ("baseball bat", it(1.0, 20.0, Some(0.13), None, Some(Texture::Polished), Some(MainHand), Some("wood"), "wooden club, balanced for swinging")),
-        ("wooden club", it(1.5, 20.0, Some(0.13), None, Some(Texture::Rough), Some(MainHand), Some("wood"), "rough-cut bludgeon")),
-        ("brick", it(2.5, 20.0, None, None, Some(Texture::Coarse), None, Some("brick"), "throwable masonry block")),
+        // weapons — damage dice mirror D&D-ish baselines
+        ("steel crowbar",
+            weapon(2.5, Texture::Polished, "steel",
+                DamageDice::with_bonus(1, 8, 1),
+                "heavy steel pry bar — bludgeon, can punch through doors")),
+        ("kitchen knife",
+            weapon(0.3, Texture::Sharp, "steel",
+                DamageDice::new(1, 4),
+                "sharp narrow blade — clean cuts")),
+        ("hunting knife",
+            weapon(0.5, Texture::Sharp, "steel",
+                DamageDice::with_bonus(1, 6, 1),
+                "fixed-blade hunting knife")),
+        ("baseball bat",
+            weapon(1.0, Texture::Polished, "wood",
+                DamageDice::new(1, 6),
+                "wooden club, balanced for swinging")),
+        ("wooden club",
+            weapon(1.5, Texture::Rough, "wood",
+                DamageDice::with_bonus(1, 6, 1),
+                "rough-cut bludgeon")),
+        ("brass candlestick",
+            weapon(1.2, Texture::Polished, "iron",
+                DamageDice::new(1, 6),
+                "heavy ornamental candlestick — surprisingly nasty")),
+        ("fire poker",
+            weapon(1.5, Texture::Polished, "iron",
+                DamageDice::with_bonus(1, 6, 1),
+                "wrought-iron poker from the fireplace")),
+        ("frying pan",
+            weapon(1.2, Texture::Smooth, "iron",
+                DamageDice::with_bonus(1, 6, 1),
+                "cast-iron skillet, both ends serviceable")),
+        ("brick",
+            misc(2.5, Some(Texture::Coarse), Some("brick"),
+                "throwable masonry block")),
+
         // food (throwable in food-fight scenario)
-        ("plate of mashed potato", it(0.4, 60.0, Some(0.5), None, Some(Texture::Sticky), None, Some("mashed_potato"), "messy lunch projectile")),
-        ("bottle of ketchup", it(0.6, 18.0, None, None, Some(Texture::Slick), None, Some("ketchup"), "sealed sauce, splatters on impact")),
-        // clothing
-        ("wool shirt", it(0.3, 30.0, Some(0.04), Some(1.0e-13), Some(Texture::Soft), Some(Torso), Some("wool"), "warm long-sleeved shirt")),
-        ("cotton t-shirt", it(0.2, 30.0, Some(0.04), Some(1.0e-13), Some(Texture::Soft), Some(Torso), Some("cotton"), "light tee")),
-        ("leather jacket", it(1.2, 30.0, Some(0.14), Some(1.0e-9), Some(Texture::Rough), Some(Torso), Some("leather"), "heavy outer layer, mild armor")),
-        ("hoodie", it(0.5, 30.0, Some(0.05), Some(1.0e-13), Some(Texture::Soft), Some(Torso), Some("cotton"), "hooded sweatshirt")),
-        ("leather boots", it(0.9, 28.0, Some(0.14), Some(1.0e-9), Some(Texture::Rough), Some(Feet), Some("leather"), "ankle-high boots")),
-        ("rubber boots", it(0.9, 25.0, Some(0.16), Some(1.0e-13), Some(Texture::Rough), Some(Feet), Some("rubber"), "high-grip rubber boots")),
-        ("hardhat", it(0.4, 25.0, None, None, Some(Texture::Smooth), Some(Head), Some("rubber"), "construction safety helmet")),
-        ("backpack", it(0.5, 25.0, None, None, Some(Texture::Rough), Some(Back), Some("cotton"), "shoulder pack with straps")),
+        ("plate of mashed potato",
+            misc(0.4, Some(Texture::Sticky), Some("mashed_potato"),
+                "messy lunch projectile")),
+        ("bottle of ketchup",
+            misc(0.6, Some(Texture::Slick), Some("ketchup"),
+                "sealed sauce, splatters on impact")),
+
+        // clothing / armor — AC bonuses are very mild
+        ("wool shirt",        clothing(0.3, Texture::Soft, Torso, "wool",   0,  "warm long-sleeved shirt")),
+        ("cotton t-shirt",    clothing(0.2, Texture::Soft, Torso, "cotton", 0,  "light tee")),
+        ("leather jacket",    clothing(1.2, Texture::Rough, Torso, "leather", 1,  "heavy outer layer, mild armor")),
+        ("hoodie",            clothing(0.5, Texture::Soft, Torso, "cotton", 0,  "hooded sweatshirt")),
+        ("kevlar vest",       clothing(2.5, Texture::Rough, Torso, "leather", 3,  "ballistic vest — substantial AC bonus")),
+        ("leather boots",     clothing(0.9, Texture::Rough, Feet,  "leather", 0,  "ankle-high boots")),
+        ("rubber boots",      clothing(0.9, Texture::Rough, Feet,  "rubber",  0,  "high-grip rubber boots")),
+        ("hardhat",           clothing(0.4, Texture::Smooth, Head, "rubber",  1,  "construction safety helmet")),
+        ("backpack",          clothing(0.5, Texture::Rough, Back,  "cotton",  0,  "shoulder pack with straps")),
     ];
 
     for (name, tmpl) in entries {
@@ -464,6 +562,7 @@ fn populate_roles(lib: &mut Library) {
                 health: i32,
                 faction: Option<&str>,
                 equipment: &[&str],
+                stats: Option<Stats>,
                 description: &str|
      -> RoleTemplate {
         RoleTemplate {
@@ -472,23 +571,31 @@ fn populate_roles(lib: &mut Library) {
             health,
             faction: faction.map(|s| s.into()),
             equipment: equipment.iter().map(|s| (*s).to_string()).collect(),
+            stats,
             description: description.into(),
         }
     };
 
     let entries: &[(&str, RoleTemplate)] = &[
-        ("civilian", role("civilian", "humanoid", 60, Some("civilian"), &["cotton t-shirt", "leather boots"], "ordinary unarmed person")),
-        ("guard", role("guard", "humanoid", 120, Some("guard"), &["leather jacket", "leather boots", "wooden club"], "armed authority figure")),
-        ("thief", role("thief", "humanoid", 80, Some("thief"), &["hoodie", "rubber boots", "kitchen knife"], "light-footed and dangerous up close")),
-        ("soldier", role("soldier", "humanoid", 100, Some("soldier"), &["leather jacket", "leather boots", "steel crowbar"], "trained combatant — replace crowbar with rifle when ranged combat lands")),
-        ("farmer", role("farmer", "humanoid", 100, Some("farm"), &["cotton t-shirt", "leather boots"], "field worker")),
-        ("zombie", role("zombie", "humanoid", 60, Some("undead"), &[], "shambling, hungry")),
-        ("dog", role("dog", "quadruped", 80, Some("feral"), &[], "fast quadruped with bite attack")),
-        ("dragon", role("dragon", "dragon", 500, Some("dragon"), &[], "large flying reptile")),
-        // scenario-specific colour
-        ("market_shopper", role("shopper", "humanoid", 60, Some("crowd"), &["cotton t-shirt", "leather boots"], "for the Indian-market thief scenario — wandering background")),
-        ("freshman", role("freshman", "humanoid", 60, Some("freshman"), &["hoodie", "rubber boots"], "for the cafeteria food-fight scenario")),
-        ("senior", role("senior", "humanoid", 70, Some("senior"), &["leather jacket", "leather boots"], "for the cafeteria food-fight scenario")),
+        ("civilian",      role("civilian", "humanoid", 60, Some("civilian"), &["cotton t-shirt", "leather boots"], Some(Stats::citizen()), "ordinary unarmed person")),
+        ("guard",         role("guard", "humanoid", 120, Some("guard"), &["leather jacket", "leather boots", "wooden club"], Some(Stats::brute()), "armed authority figure")),
+        ("thief",         role("thief", "humanoid", 80, Some("thief"), &["hoodie", "rubber boots", "kitchen knife"], Some(Stats::rogue()), "light-footed and dangerous up close")),
+        ("soldier",       role("soldier", "humanoid", 100, Some("soldier"), &["leather jacket", "leather boots", "steel crowbar"], Some(Stats::brute()), "trained combatant")),
+        ("farmer",        role("farmer", "humanoid", 100, Some("farm"), &["cotton t-shirt", "leather boots"], Some(Stats::citizen()), "field worker")),
+        ("zombie",        role("zombie", "humanoid", 60, Some("undead"), &[], Some(Stats::brute()), "shambling, hungry")),
+        ("dog",           role("dog", "quadruped", 80, Some("feral"), &[], Some(Stats::rogue()), "fast quadruped with bite attack")),
+        ("dragon",        role("dragon", "dragon", 500, Some("dragon"), &[], Some(Stats { str_: 22, dex: 12, con: 20, int: 16, wis: 14, cha: 17 }), "large flying reptile")),
+        // family / scenario-specific
+        ("father",        role("father", "humanoid", 100, Some("family"), &["cotton t-shirt", "leather boots"], Some(Stats { str_: 14, dex: 11, con: 13, int: 11, wis: 11, cha: 11 }), "family head — moderate STR")),
+        ("mother",        role("mother", "humanoid", 80, Some("family"), &["wool shirt", "leather boots"], Some(Stats { str_: 11, dex: 13, con: 12, int: 13, wis: 13, cha: 12 }), "family head — average DEX")),
+        ("teenager",      role("teen", "humanoid", 60, Some("family"), &["hoodie", "rubber boots"], Some(Stats { str_: 10, dex: 14, con: 11, int: 12, wis: 9, cha: 12 }), "older child, quick on feet")),
+        ("child",         role("child", "humanoid", 30, Some("family"), &["cotton t-shirt", "rubber boots"], Some(Stats::child()), "small kid")),
+        ("elder",         role("elder", "humanoid", 50, Some("family"), &["wool shirt", "leather boots"], Some(Stats::elder()), "frail grandparent")),
+        ("burglar",       role("burglar", "humanoid", 90, Some("invader"), &["hoodie", "rubber boots", "fire poker"], Some(Stats::rogue()), "lockpicker, light-fingered")),
+        ("brute",         role("brute", "humanoid", 130, Some("invader"), &["leather jacket", "leather boots", "steel crowbar"], Some(Stats::brute()), "the muscle")),
+        ("market_shopper", role("shopper", "humanoid", 60, Some("crowd"), &["cotton t-shirt", "leather boots"], None, "for the Indian-market thief scenario — wandering background")),
+        ("freshman",      role("freshman", "humanoid", 60, Some("freshman"), &["hoodie", "rubber boots"], None, "for the cafeteria food-fight scenario")),
+        ("senior",        role("senior", "humanoid", 70, Some("senior"), &["leather jacket", "leather boots"], None, "for the cafeteria food-fight scenario")),
     ];
 
     for (name, tmpl) in entries {

@@ -11,6 +11,8 @@ pub mod actions;
 pub mod anatomy;
 pub mod combat;
 pub mod components;
+pub mod dice;
+pub mod door;
 pub mod inject;
 pub mod items;
 pub mod library;
@@ -23,6 +25,7 @@ pub mod rng;
 pub mod scenario;
 pub mod simulation;
 pub mod sound;
+pub mod stats;
 pub mod tasks;
 pub mod time;
 pub mod world;
@@ -34,7 +37,8 @@ pub use anatomy::{
     BodyPartSpec, BodyPlan, Function, HitWeight, PartHealth, PartLabel, PartOf, PartStatus,
     ProvidesFunctions,
 };
-pub use combat::{resolve_attack, AttackResult};
+pub use combat::{armor_class, resolve_attack, AttackResult};
+pub use door::{door_at, door_voxel_sync, Door, DoorState};
 pub use inject::{apply_action, apply_json, Action};
 pub use library::{
     ensure_material, spawn_item_template, spawn_role_template, ItemSpawnOpts, ItemTemplate,
@@ -42,11 +46,15 @@ pub use library::{
 };
 pub use physics::{decay_coatings, footing_check, Coating, Locomotion};
 pub use components::{ExtraData, Faction, Health, Kind, Position};
+pub use dice::{
+    check, manipulation_check, roll_d20, roll_dice, strength_check, CheckOutcome, RollResult,
+};
 pub use items::{
     drop_item, equip_item, give_item, held_weapons_summary, item_world_position, unequip_item,
-    BodySlot, ElectricalConductivity, Inventory, Item, ItemMaterial, ItemName, Mass, Temperature,
-    Texture, ThermalConductivity, Wearable, Wearing,
+    ArmorBonus, BodySlot, DamageDice, ElectricalConductivity, Inventory, Item, ItemMaterial,
+    ItemName, Mass, Temperature, Texture, ThermalConductivity, Wearable, Wearing,
 };
+pub use stats::Stats;
 pub use log::{narrate, Event, EventLog};
 pub use needs::{
     derive_mood, eat_on_use, fear_from_combat, tick_needs, Edible, Energy, Fear, Hunger, Mood,

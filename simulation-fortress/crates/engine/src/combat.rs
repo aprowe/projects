@@ -1,12 +1,17 @@
-//! Combat resolution.
+//! Combat resolution, D&D-style.
 //!
-//! `resolve_attack(world, attacker, target)` picks a body part on the
-//! target weighted by its `HitWeight`, computes damage from the
-//! attacker's main-hand weapon (mass + texture), applies it to both the
-//! local part HP and the creature's aggregate `Health`, and decides
-//! whether the part is bruised, broken, crushed, or severed. Critical
-//! organ destruction (heart, neck, decapitation) instantly drops the
-//! creature's aggregate health to zero.
+//! `resolve_attack(attacker, target)` rolls 1d20 + STR mod against
+//! the target's Armor Class. On a hit it rolls the weapon's damage
+//! dice (or 1d4 fist), picks a body part by HitWeight, and applies
+//! the damage to both the part's local HP and the creature's
+//! aggregate Health. Natural 20 is a critical hit (max dice). Miss
+//! emits `AttackMissed`; hit emits `BodyPartWounded` (and
+//! `BodyPartDestroyed` if the part drops to 0); crit emits
+//! `CriticalHit`. Destroying Heart, Head, or Neck instantly drops
+//! the target's aggregate health to zero.
+//!
+//! All randomness routes through the seeded `Rng` resource — runs
+//! are reproducible.
 
 use bevy_ecs::prelude::{Entity, World};
 
@@ -14,17 +19,23 @@ use crate::anatomy::{
     anatomy_alive, BodyPartKind, HitWeight, PartHealth, PartOf, PartStatus,
 };
 use crate::components::Health;
-use crate::items::{BodySlot, ItemName, Mass, Texture, Wearing};
+use crate::dice::{roll_d20, roll_dice, RollResult};
+use crate::items::{ArmorBonus, BodySlot, DamageDice, ItemName, Texture, Wearing};
 use crate::log::{Event, EventLog};
 use crate::rng::Rng;
+use crate::stats::Stats;
 use crate::time::Clock;
 
 /// Summary of a single resolved blow.
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct AttackResult {
+    pub attack_roll: RollResult,
+    pub target_ac: i32,
+    pub hit: bool,
+    pub critical: bool,
     pub damage: i32,
-    pub part: BodyPartKind,
-    pub status: PartStatus,
+    pub part: Option<BodyPartKind>,
+    pub status: Option<PartStatus>,
     pub destroyed: bool,
     pub killed: bool,
 }
@@ -32,20 +43,109 @@ pub struct AttackResult {
 #[derive(Clone, Debug)]
 struct WeaponInfo {
     name: String,
-    mass: f32,
-    texture: Option<Texture>,
+    dice: DamageDice,
+    sharp: bool,
 }
 
 pub fn resolve_attack(
     world: &mut World,
     attacker: Entity,
     target: Entity,
-) -> Option<AttackResult> {
+) -> AttackResult {
     let weapon = describe_weapon(world, attacker);
-    let damage = compute_damage(&weapon);
+    let attack_mod = world
+        .get::<Stats>(attacker)
+        .map(|s| s.str_mod())
+        .unwrap_or(0);
+    let target_ac = armor_class(world, target);
 
-    let part_entity = pick_body_part(world, target)?;
-    let part_kind = *world.get::<BodyPartKind>(part_entity)?;
+    // Attack roll
+    let attack_roll = {
+        let mut rng = world.resource_mut::<Rng>();
+        roll_d20(&mut rng, attack_mod)
+    };
+    let critical = attack_roll.is_critical_hit();
+    let critical_miss = attack_roll.is_critical_miss();
+    let hit = !critical_miss && (critical || attack_roll.total >= target_ac);
+
+    if !hit {
+        push_event(
+            world,
+            Event::AttackMissed {
+                attacker,
+                target,
+                attack_roll: attack_roll.total,
+                target_ac,
+                weapon: weapon.name.clone(),
+            },
+        );
+        return AttackResult {
+            attack_roll,
+            target_ac,
+            hit: false,
+            critical: false,
+            damage: 0,
+            part: None,
+            status: None,
+            destroyed: false,
+            killed: false,
+        };
+    }
+
+    // Damage roll. On crit, max possible dice + bonus + str_mod.
+    let damage = {
+        let mut rng = world.resource_mut::<Rng>();
+        let raw = if critical {
+            (weapon.dice.count as i32) * (weapon.dice.sides as i32)
+        } else {
+            roll_dice(&mut rng, weapon.dice.count, weapon.dice.sides)
+        };
+        (raw + weapon.dice.bonus + attack_mod).max(1)
+    };
+
+    // Pick a body part to wound.
+    let part_entity = match pick_body_part(world, target) {
+        Some(e) => e,
+        None => {
+            push_event(
+                world,
+                Event::AttackMissed {
+                    attacker,
+                    target,
+                    attack_roll: attack_roll.total,
+                    target_ac,
+                    weapon: weapon.name.clone(),
+                },
+            );
+            return AttackResult {
+                attack_roll,
+                target_ac,
+                hit: false,
+                critical: false,
+                damage: 0,
+                part: None,
+                status: None,
+                destroyed: false,
+                killed: false,
+            };
+        }
+    };
+    let part_kind = match world.get::<BodyPartKind>(part_entity).copied() {
+        Some(k) => k,
+        None => {
+            return AttackResult {
+                attack_roll,
+                target_ac,
+                hit: false,
+                critical: false,
+                damage: 0,
+                part: None,
+                status: None,
+                destroyed: false,
+                killed: false,
+            };
+        }
+    };
 
     let (status, destroyed) = apply_part_damage(world, part_entity, &weapon, damage);
 
@@ -62,6 +162,16 @@ pub fn resolve_attack(
         }
     }
 
+    if critical {
+        push_event(
+            world,
+            Event::CriticalHit {
+                attacker,
+                target,
+                weapon: weapon.name.clone(),
+            },
+        );
+    }
     push_event(
         world,
         Event::BodyPartWounded {
@@ -106,13 +216,17 @@ pub fn resolve_attack(
         );
     }
 
-    Some(AttackResult {
+    AttackResult {
+        attack_roll,
+        target_ac,
+        hit: true,
+        critical,
         damage,
-        part: part_kind,
-        status,
+        part: Some(part_kind),
+        status: Some(status),
         destroyed,
         killed: dead,
-    })
+    }
 }
 
 fn describe_weapon(world: &World, attacker: Entity) -> WeaponInfo {
@@ -120,34 +234,40 @@ fn describe_weapon(world: &World, attacker: Entity) -> WeaponInfo {
         .get::<Wearing>(attacker)
         .and_then(|w| w.get(BodySlot::MainHand));
     if let Some(weapon) = weapon {
-        WeaponInfo {
-            name: world
-                .get::<ItemName>(weapon)
-                .map(|n| n.0.clone())
-                .unwrap_or_else(|| "weapon".into()),
-            mass: world.get::<Mass>(weapon).map(|m| m.0).unwrap_or(0.5),
-            texture: world.get::<Texture>(weapon).copied(),
-        }
+        let name = world
+            .get::<ItemName>(weapon)
+            .map(|n| n.0.clone())
+            .unwrap_or_else(|| "weapon".into());
+        let dice = world
+            .get::<DamageDice>(weapon)
+            .copied()
+            .unwrap_or(DamageDice::new(1, 4));
+        let sharp = matches!(world.get::<Texture>(weapon).copied(), Some(Texture::Sharp));
+        WeaponInfo { name, dice, sharp }
     } else {
         WeaponInfo {
             name: "fist".into(),
-            mass: 0.5,
-            texture: Some(Texture::Soft),
+            dice: DamageDice::new(1, 3),
+            sharp: false,
         }
     }
 }
 
-fn compute_damage(weapon: &WeaponInfo) -> i32 {
-    let base = (weapon.mass * 10.0).round() as i32;
-    let modifier = match weapon.texture {
-        Some(Texture::Sharp) => 1.5,
-        Some(Texture::Polished) | Some(Texture::Smooth) => 1.0,
-        Some(Texture::Rough) | Some(Texture::Coarse) | Some(Texture::Bumpy) => 0.9,
-        Some(Texture::Sticky) | Some(Texture::Slick) => 0.7,
-        Some(Texture::Soft) | Some(Texture::Furry) => 0.5,
-        None => 1.0,
-    };
-    ((base as f32 * modifier).round() as i32).max(1)
+/// 10 + DEX modifier + sum of all worn item ArmorBonus.
+pub fn armor_class(world: &World, entity: Entity) -> i32 {
+    let dex_mod = world
+        .get::<Stats>(entity)
+        .map(|s| s.dex_mod())
+        .unwrap_or(0);
+    let armor_bonus: i32 = world
+        .get::<Wearing>(entity)
+        .map(|w| {
+            w.iter()
+                .filter_map(|(_, item)| world.get::<ArmorBonus>(item).map(|b| b.0))
+                .sum()
+        })
+        .unwrap_or(0);
+    10 + dex_mod + armor_bonus
 }
 
 fn pick_body_part(world: &mut World, target: Entity) -> Option<Entity> {
@@ -180,19 +300,18 @@ fn apply_part_damage(
     weapon: &WeaponInfo,
     damage: i32,
 ) -> (PartStatus, bool) {
-    let sharp = matches!(weapon.texture, Some(Texture::Sharp));
     let mut ph = world
         .get_mut::<PartHealth>(part_entity)
         .expect("hit a part without PartHealth");
     ph.current -= damage;
     let status = if ph.current <= 0 {
-        if sharp {
+        if weapon.sharp {
             PartStatus::Severed
         } else {
             PartStatus::Crushed
         }
     } else if ph.current < ph.max / 2 {
-        if sharp {
+        if weapon.sharp {
             PartStatus::Cut
         } else {
             PartStatus::Broken

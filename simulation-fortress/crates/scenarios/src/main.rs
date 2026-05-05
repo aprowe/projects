@@ -13,6 +13,7 @@ use replay::ReplayRenderer;
 mod family_home;
 mod farming;
 mod home_invasion;
+mod mansion;
 mod office;
 mod replay;
 
@@ -116,9 +117,30 @@ fn main() {
                 replay_html_path.clone(), "family home invasion",
             )
         }
+        "mansion" => {
+            let mut scenario = mansion::MansionInvasion;
+            let ascii = AsciiRenderer::new(Pos::new(-1, -1, 0), Pos::new(16, 14, 0))
+                .at_z(0)
+                .frame_every(1)
+                .faction("invader", 'I')
+                .faction("family", 'f')
+                .entity_kind("front door", '+')
+                .entity_kind("master bedroom door", '+')
+                .entity_kind("kid's bedroom door", '+')
+                .entity_kind("tv set", 'T')
+                .entity_kind("sofa", 's')
+                .entity_kind("dining table", 't')
+                .entity_kind("refrigerator", 'F')
+                .entity_kind("fireplace", '*')
+                .entity_kind("locked dresser", 'd');
+            run_with_optional_replay(
+                &mut sim, &mut scenario, options, ascii, repl,
+                replay_html_path.clone(), "mansion home invasion",
+            )
+        }
         other => {
             eprintln!("unknown scenario: {other}");
-            eprintln!("available: home_invasion, farming, office, family_home");
+            eprintln!("available: home_invasion, farming, office, family_home, mansion");
             std::process::exit(1);
         }
     };
