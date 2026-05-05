@@ -14,6 +14,7 @@ mod airport;
 mod bank;
 mod cabin;
 mod family_home;
+mod tui;
 mod farming;
 mod home_invasion;
 mod mansion;
@@ -25,6 +26,7 @@ fn main() {
     let mut scenario_name: Option<String> = None;
     let mut fast = false;
     let mut repl = false;
+    let mut tui_mode = false;
     let mut max_ticks: u64 = 200;
     let mut pace_ms: u64 = 400;
     let mut replay_html_path: Option<std::path::PathBuf> = None;
@@ -33,6 +35,7 @@ fn main() {
         match arg.as_str() {
             "--fast" => fast = true,
             "--repl" => repl = true,
+            "--tui" => tui_mode = true,
             "--ticks" => {
                 max_ticks = args
                     .next()
@@ -51,14 +54,28 @@ fn main() {
             other => {
                 eprintln!("unknown argument: {other}");
                 eprintln!(
-                    "usage: fortress [scenario] [--fast] [--repl] [--ticks N] [--pace-ms N] [--replay-html FILE]"
+                    "usage: fortress [scenario] [--fast] [--repl] [--tui] [--ticks N] [--pace-ms N] [--replay-html FILE]"
                 );
                 std::process::exit(2);
             }
         }
     }
 
+    let scenario_name_for_tui = scenario_name.clone();
     let scenario_name = scenario_name.unwrap_or_else(|| "home_invasion".into());
+    set_tui_mode(tui_mode);
+
+    // Interactive TUI dispatch — before any of the headless branches.
+    if tui_mode {
+        let entries = build_scenario_entries();
+        let initial = scenario_name_for_tui
+            .as_deref()
+            .and_then(|n| entries.iter().position(|e| e.name == n));
+        if let Err(e) = tui::run(entries, initial) {
+            eprintln!("TUI error: {e}");
+        }
+        return;
+    }
     let pacing = if fast || repl {
         None
     } else {
@@ -265,7 +282,130 @@ fn run_with_optional_replay<S: Scenario>(
     replay_path: Option<std::path::PathBuf>,
     title: &str,
 ) -> u64 {
+    if global_tui_mode() {
+        // TUI mode is dispatched centrally before scenario branches
+        // run; this guard short-circuits any leftover branch path.
+        return 0;
+    }
     run_with_optional_replay_zs(sim, scenario, options, ascii, repl, replay_path, title, &[])
+}
+
+// TUI flag stored in a process-wide static (set once from main, read
+// by the scenario branches without changing every signature).
+static TUI_MODE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+fn set_tui_mode(on: bool) { let _ = TUI_MODE.set(on); }
+fn global_tui_mode() -> bool { TUI_MODE.get().copied().unwrap_or(false) }
+
+/// Build the catalog of factory-backed scenario entries used by the
+/// TUI scenario picker (and rewind / restart).
+fn build_scenario_entries() -> Vec<tui::ScenarioEntry> {
+    use tui::{ScenarioEntry, ScenarioFactory};
+    fn entry(
+        name: &str,
+        factory: ScenarioFactory,
+    ) -> ScenarioEntry {
+        ScenarioEntry { name: name.to_string(), factory }
+    }
+    vec![
+        entry("home_invasion", Box::new(|| {
+            let s = home_invasion::HomeInvasion;
+            let ascii = AsciiRenderer::new(Pos::new(-1, -4, 0), Pos::new(8, 8, 0))
+                .at_z(0).frame_every(1)
+                .entity_kind("intruder", 'I').faction("family", 'f');
+            (Box::new(s), ascii)
+        })),
+        entry("farming", Box::new(|| {
+            let s = farming::Farming;
+            let ascii = AsciiRenderer::new(Pos::new(-1, -1, 0), Pos::new(7, 7, 0))
+                .at_z(0).frame_every(1).faction("farm", 'F');
+            (Box::new(s), ascii)
+        })),
+        entry("office", Box::new(|| {
+            let s = office::OfficeDrama;
+            let ascii = AsciiRenderer::new(Pos::new(0, 0, 0), Pos::new(11, 9, 0))
+                .at_z(0).frame_every(1).faction("office", 'o');
+            (Box::new(s), ascii)
+        })),
+        entry("family_home", Box::new(|| {
+            let s = family_home::FamilyHome;
+            let ascii = AsciiRenderer::new(Pos::new(-1, -1, 0), Pos::new(10, 10, 0))
+                .at_z(0).frame_every(1)
+                .faction("invader", 'I').faction("family", 'f')
+                .faction("kid", 'k').faction("feral", 'D');
+            (Box::new(s), ascii)
+        })),
+        entry("mansion", Box::new(|| {
+            let s = mansion::MansionInvasion;
+            let mut ascii = AsciiRenderer::new(Pos::new(-2, -2, 0), Pos::new(60, 45, 0))
+                .at_z(0).frame_every(1)
+                .faction("invader", 'I').faction("family", 'f');
+            for (k, g) in mansion_glyphs() { ascii = ascii.entity_kind(k, g); }
+            (Box::new(s), ascii)
+        })),
+        entry("airport", Box::new(|| {
+            let s = airport::AirportInfiltration;
+            let ascii = AsciiRenderer::new(Pos::new(-1, -1, 0), Pos::new(25, 13, 0))
+                .at_z(0).frame_every(1)
+                .faction("spy", 'S').faction("security", 'G')
+                .faction("staff", 's').faction("public", 'p')
+                .entity_kind("staff door", '+')
+                .entity_kind("X-ray belt", 'X')
+                .entity_kind("gate B7", 'B');
+            (Box::new(s), ascii)
+        })),
+        entry("bank", Box::new(|| {
+            let s = bank::BankHeist;
+            let ascii = AsciiRenderer::new(Pos::new(0, 0, 0), Pos::new(40, 33, 0))
+                .at_z(0).frame_every(1)
+                .faction("robber", 'R').faction("staff", 's')
+                .faction("public", 'p').faction("police", 'C')
+                .entity_kind("bank vault", 'V').entity_kind("ATM", 'A')
+                .entity_kind("cash register", '$').entity_kind("teller window", 'I');
+            (Box::new(s), ascii)
+        })),
+        entry("cabin", Box::new(|| {
+            let s = cabin::CabinAmbush;
+            let mut ascii = AsciiRenderer::new(Pos::new(0, 0, 0), Pos::new(30, 30, 0))
+                .at_z(0).frame_every(1)
+                .faction("retiree", 'O').faction("assassin", 'A');
+            for (k, g) in [
+                ("cabin door", '+'), ("safe", 'S'), ("getaway van", 'V'),
+                ("oak tree", 'T'), ("pine tree", 't'), ("birch tree", 'T'),
+                ("redwood tree", 'T'), ("bush", '&'), ("rock", '*'),
+                ("camp fire", '*'), ("fireplace", '*'),
+            ] { ascii = ascii.entity_kind(k, g); }
+            (Box::new(s), ascii)
+        })),
+    ]
+}
+
+fn mansion_glyphs() -> Vec<(&'static str, char)> {
+    vec![
+        ("sofa", 's'), ("armchair", 'a'), ("dining chair", 'h'), ("bench", 'b'),
+        ("ottoman", 'o'), ("recliner", 'r'),
+        ("king bed", 'B'), ("queen bed", 'B'), ("twin bed", 'b'), ("crib", 'c'),
+        ("wardrobe", 'W'), ("dresser", 'D'), ("locked dresser", 'D'),
+        ("nightstand", 'n'), ("bookshelf", 'L'), ("china cabinet", 'C'),
+        ("safe", 'S'), ("filing cabinet", 'f'),
+        ("dining table", 't'), ("coffee table", 'c'), ("desk", 'd'),
+        ("kitchen island", 'i'), ("side table", 's'),
+        ("tv set", 'T'), ("stereo", 'r'), ("refrigerator", 'F'),
+        ("stove on", 'O'), ("stove", 'O'), ("microwave", 'm'), ("dishwasher", 'w'),
+        ("washer", 'w'), ("dryer", 'y'), ("fireplace", '*'), ("ceiling fan", 'F'),
+        ("toilet", 'u'), ("bathroom sink", 'k'), ("kitchen sink", 'K'),
+        ("bathtub", 'U'), ("shower", 'H'),
+        ("table lamp", 'l'), ("floor lamp", 'L'), ("chandelier", 'X'),
+        ("painting", 'P'), ("oil portrait", 'P'), ("abstract canvas", 'P'),
+        ("photograph", 'p'), ("mirror", 'M'), ("wall clock", 'C'),
+        ("window", 'i'), ("sliding glass door", '/'),
+        ("potted plant", '%'), ("vase", 'v'),
+        ("staircase up", '>'),
+        ("grill", 'g'), ("patio chair", 'h'), ("patio table", 't'),
+        ("hammock", '~'), ("mailbox", 'M'), ("garden gnome", 'g'),
+        ("pool", '~'), ("hot tub", '@'),
+        ("front door", '+'), ("dining room door", '+'), ("kitchen door", '+'),
+        ("master bedroom door", '+'), ("kid's bedroom door", '+'),
+    ]
 }
 
 fn run_with_optional_replay_zs<S: Scenario>(
@@ -278,6 +418,11 @@ fn run_with_optional_replay_zs<S: Scenario>(
     title: &str,
     z_slices: &[i32],
 ) -> u64 {
+    if global_tui_mode() {
+        // TUI dispatch happens in main(); shouldn't reach here.
+        let _ = (scenario, ascii);
+        return 0;
+    }
     let log = LogRenderer::default();
     let t = if let Some(path) = replay_path {
         let mut replay = ReplayRenderer::new(ascii.clone(), path.clone(), title);

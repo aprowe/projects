@@ -76,7 +76,7 @@ impl Simulation {
     /// `setup`, and return its `Schedule`. After this returns the
     /// caller can drive the sim manually with [`Self::step`] or hand
     /// off to [`Self::run_with`].
-    pub fn prepare<S: Scenario>(&mut self, scenario: &mut S, options: RunOptions) -> Schedule {
+    pub fn prepare<S: Scenario + ?Sized>(&mut self, scenario: &mut S, options: RunOptions) -> Schedule {
         self.world.insert_resource(Rng::from_seed(options.rng_seed));
         scenario.setup(&mut self.world);
         scenario.build_schedule()
