@@ -120,20 +120,56 @@ fn main() {
         }
         "mansion" => {
             let mut scenario = mansion::MansionInvasion;
-            let ascii = AsciiRenderer::new(Pos::new(-1, -1, 0), Pos::new(16, 14, 0))
+            let mut ascii = AsciiRenderer::new(Pos::new(-2, -2, 0), Pos::new(60, 45, 0))
                 .at_z(0)
                 .frame_every(1)
                 .faction("invader", 'I')
-                .faction("family", 'f')
-                .entity_kind("front door", '+')
-                .entity_kind("master bedroom door", '+')
-                .entity_kind("kid's bedroom door", '+')
-                .entity_kind("tv set", 'T')
-                .entity_kind("sofa", 's')
-                .entity_kind("dining table", 't')
-                .entity_kind("refrigerator", 'F')
-                .entity_kind("fireplace", '*')
-                .entity_kind("locked dresser", 'd');
+                .faction("family", 'f');
+            // Furniture glyphs — tile each archetype with a recognizable letter.
+            for (kind, glyph) in [
+                ("sofa", 's'), ("armchair", 'a'), ("dining chair", 'h'), ("bench", 'b'),
+                ("ottoman", 'o'), ("recliner", 'r'),
+                ("king bed", 'B'), ("queen bed", 'B'), ("twin bed", 'b'), ("crib", 'c'),
+                ("wardrobe", 'W'), ("dresser", 'D'), ("locked dresser", 'D'),
+                ("nightstand", 'n'), ("bookshelf", 'L'), ("china cabinet", 'C'),
+                ("safe", 'S'), ("filing cabinet", 'f'),
+                ("dining table", 't'), ("coffee table", 'c'), ("desk", 'd'),
+                ("kitchen island", 'i'), ("side table", 's'),
+                ("tv set", 'T'), ("stereo", 'r'), ("refrigerator", 'F'),
+                ("stove", 'O'), ("stove on", 'O'), ("microwave", 'm'), ("dishwasher", 'w'),
+                ("washer", 'w'), ("dryer", 'y'),
+                ("fireplace", '*'), ("ceiling fan", 'F'),
+                ("toilet", 'u'), ("bathroom sink", 'k'), ("kitchen sink", 'K'),
+                ("bathtub", 'U'), ("shower", 'H'),
+                ("table lamp", 'l'), ("floor lamp", 'L'), ("chandelier", 'X'), ("sconce", 'i'),
+                ("painting", 'P'), ("oil portrait", 'P'), ("abstract canvas", 'P'),
+                ("photograph", 'p'), ("mirror", 'M'), ("wall clock", 'C'),
+                ("persian rug", '_'), ("kitchen mat", '_'), ("bath mat", '_'),
+                ("window", 'i'), ("open window", '/'),
+                ("sliding glass door", '/'),
+                ("potted plant", '%'), ("vase", 'v'), ("books", 'b'), ("candle", 'c'),
+                ("staircase up", '>'), ("staircase down", '<'),
+                ("column", '|'), ("railing", '-'),
+                ("grill", 'g'), ("patio chair", 'h'), ("patio table", 't'),
+                ("hammock", '~'), ("mailbox", 'M'), ("garden gnome", 'g'),
+                ("pool", '~'), ("hot tub", '@'),
+                ("front door", '+'), ("dining room door", '+'), ("kitchen door", '+'),
+                ("pantry door", '+'), ("laundry door", '+'), ("guest room door", '+'),
+                ("master bedroom door", '+'), ("master bath door", '+'),
+                ("master closet door", '+'), ("kid's bedroom door", '+'),
+                ("kid's bath door", '+'), ("study door", '+'), ("family room door", '+'),
+            ] {
+                ascii = ascii.entity_kind(kind, glyph);
+            }
+            // Powered devices (custom labels in scenarios)
+            for kind in [
+                "Marantz stereo (vinyl playing)",
+                "gas stove (front-left burner on)",
+                "playroom TV (cartoons)",
+                "family room TV (sports)",
+            ] {
+                ascii = ascii.entity_kind(kind, 'T');
+            }
             run_with_optional_replay(
                 &mut sim, &mut scenario, options, ascii, repl,
                 replay_html_path.clone(), "mansion home invasion",

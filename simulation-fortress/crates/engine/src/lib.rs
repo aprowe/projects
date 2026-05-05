@@ -14,6 +14,7 @@ pub mod components;
 pub mod dialog;
 pub mod dice;
 pub mod door;
+pub mod furniture;
 pub mod inject;
 pub mod items;
 pub mod library;
@@ -44,10 +45,15 @@ pub use dialog::{
     Identity, Knowledge, Observer, Suspicion,
 };
 pub use door::{door_at, door_voxel_sync, Door, DoorState};
+pub use furniture::{
+    furniture_emit_system, Container, Furniture, FurnitureKind, LightSource, Painting,
+    PowerSource, Powered, Rug, Stair, Window, WindowState,
+};
 pub use inject::{apply_action, apply_json, Action};
 pub use library::{
-    ensure_material, spawn_item_template, spawn_role_template, ItemSpawnOpts, ItemTemplate,
-    Library, LibraryHit, RoleSpawnOpts, RoleTemplate,
+    ensure_material, spawn_furniture_template, spawn_item_template, spawn_role_template,
+    ContainerSpec, FurnitureSpawnOpts, FurnitureTemplate, ItemSpawnOpts, ItemTemplate, Library,
+    LibraryHit, PaintingSpec, PoweredSpec, RoleSpawnOpts, RoleTemplate, RugSpec, WindowSpec,
 };
 pub use physics::{decay_coatings, footing_check, Coating, Locomotion};
 pub use components::{ExtraData, Faction, Health, Kind, Position};

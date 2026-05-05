@@ -103,31 +103,14 @@ pub fn resolve_attack(
         (raw + weapon.dice.bonus + attack_mod).max(1)
     };
 
-    // Pick a body part to wound.
+    // Pick a body part to wound. If the target has no anatomy, the
+    // hit lands on aggregate Health directly.
     let part_entity = match pick_body_part(world, target) {
         Some(e) => e,
         None => {
-            push_event(
-                world,
-                Event::AttackMissed {
-                    attacker,
-                    target,
-                    attack_roll: attack_roll.total,
-                    target_ac,
-                    weapon: weapon.name.clone(),
-                },
+            return apply_bodyless_hit(
+                world, attacker, target, weapon, attack_roll, target_ac, damage, critical,
             );
-            return AttackResult {
-                attack_roll,
-                target_ac,
-                hit: false,
-                critical: false,
-                damage: 0,
-                part: None,
-                status: None,
-                destroyed: false,
-                killed: false,
-            };
         }
     };
     let part_kind = match world.get::<BodyPartKind>(part_entity).copied() {
@@ -226,6 +209,82 @@ pub fn resolve_attack(
         status: Some(status),
         destroyed,
         killed: dead,
+    }
+}
+
+/// Damage path for entities without anatomy (zombies, training
+/// dummies, debug spawns). Skips the body-part roll and applies
+/// damage straight to aggregate Health, still emitting hit / kill
+/// events. Returns an `AttackResult` with `part = None`.
+#[allow(clippy::too_many_arguments)]
+fn apply_bodyless_hit(
+    world: &mut World,
+    attacker: Entity,
+    target: Entity,
+    weapon: WeaponInfo,
+    attack_roll: RollResult,
+    target_ac: i32,
+    damage: i32,
+    critical: bool,
+) -> AttackResult {
+    let (remaining, killed) = {
+        let mut h = match world.get_mut::<Health>(target) {
+            Some(h) => h,
+            None => {
+                return AttackResult {
+                    attack_roll,
+                    target_ac,
+                    hit: false,
+                    critical: false,
+                    damage: 0,
+                    part: None,
+                    status: None,
+                    destroyed: false,
+                    killed: false,
+                };
+            }
+        };
+        h.current = (h.current - damage).max(0);
+        (h.current, h.current == 0)
+    };
+    if critical {
+        push_event(
+            world,
+            Event::CriticalHit {
+                attacker,
+                target,
+                weapon: weapon.name.clone(),
+            },
+        );
+    }
+    push_event(
+        world,
+        Event::EntityAttacked {
+            attacker: Some(attacker),
+            target,
+            damage,
+            remaining_health: remaining,
+        },
+    );
+    if killed {
+        push_event(
+            world,
+            Event::EntityKilled {
+                entity: target,
+                by: Some(attacker),
+            },
+        );
+    }
+    AttackResult {
+        attack_roll,
+        target_ac,
+        hit: true,
+        critical,
+        damage,
+        part: None,
+        status: None,
+        destroyed: false,
+        killed,
     }
 }
 

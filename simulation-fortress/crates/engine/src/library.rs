@@ -22,12 +22,17 @@ use crate::actions::spawn_creature;
 use crate::anatomy::{
     apply_body_plan, dragon_body_plan, humanoid_body_plan, quadruped_body_plan, BodyPlan,
 };
-use crate::components::Position;
+use crate::components::{Kind, Position};
+use crate::furniture::{
+    Container, Furniture, FurnitureKind, LightSource, Painting, PowerSource, Powered, Rug,
+    Window,
+};
 use crate::items::{
     equip_item as engine_equip, give_item, ArmorBonus, BodySlot, DamageDice,
     ElectricalConductivity, Item, ItemMaterial, ItemName, Mass, Temperature, Texture,
     ThermalConductivity, Wearable,
 };
+use crate::sound::SoundKind;
 use crate::stats::Stats;
 use crate::tasks::{Goal, TaskQueue};
 use crate::world::{Material, MaterialId, Pos, VoxelWorld};
@@ -70,12 +75,64 @@ pub struct RoleTemplate {
     pub stats: Option<Stats>,
 }
 
+/// A piece of furniture in the catalog. Each template knows its
+/// kind, its glyph (for ASCII renderers), the material it's made of,
+/// optional ambient sound + heat (for `Powered` appliances), and an
+/// `extras` callback for the rare attribute that doesn't fit any
+/// standard slot.
+#[derive(Clone, Debug)]
+pub struct FurnitureTemplate {
+    pub kind: FurnitureKind,
+    pub glyph: char,
+    pub material: Option<String>,
+    pub powered: Option<PoweredSpec>,
+    pub container: Option<ContainerSpec>,
+    pub window: Option<WindowSpec>,
+    pub painting: Option<PaintingSpec>,
+    pub rug: Option<RugSpec>,
+    pub light_lumens: Option<f32>,
+    pub description: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct PoweredSpec {
+    pub on: bool,
+    pub source: PowerSource,
+    pub ambient: Option<(SoundKind, f32)>,
+    pub heat_per_tick: f32,
+    pub label: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct ContainerSpec {
+    pub locked: bool,
+    pub lock_dc: i32,
+}
+
+#[derive(Clone, Debug)]
+pub struct WindowSpec {
+    pub closed: bool,
+}
+
+#[derive(Clone, Debug)]
+pub struct PaintingSpec {
+    pub artist: String,
+    pub title: String,
+    pub value: u32,
+}
+
+#[derive(Clone, Debug)]
+pub struct RugSpec {
+    pub friction: f32,
+}
+
 #[derive(Resource)]
 pub struct Library {
     pub materials: HashMap<String, Material>,
     pub items: HashMap<String, ItemTemplate>,
     pub body_plans: HashMap<String, BodyPlan>,
     pub roles: HashMap<String, RoleTemplate>,
+    pub furniture: HashMap<String, FurnitureTemplate>,
 }
 
 #[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Debug)]
@@ -84,6 +141,7 @@ pub enum LibraryHit {
     Item(String),
     BodyPlan(String),
     Role(String),
+    Furniture(String),
 }
 
 impl LibraryHit {
@@ -93,6 +151,7 @@ impl LibraryHit {
             LibraryHit::Item(_) => "item",
             LibraryHit::BodyPlan(_) => "body plan",
             LibraryHit::Role(_) => "role",
+            LibraryHit::Furniture(_) => "furniture",
         }
     }
 
@@ -101,7 +160,8 @@ impl LibraryHit {
             LibraryHit::Material(n)
             | LibraryHit::Item(n)
             | LibraryHit::BodyPlan(n)
-            | LibraryHit::Role(n) => n.as_str(),
+            | LibraryHit::Role(n)
+            | LibraryHit::Furniture(n) => n.as_str(),
         }
     }
 }
@@ -113,6 +173,7 @@ impl Default for Library {
             items: HashMap::new(),
             body_plans: HashMap::new(),
             roles: HashMap::new(),
+            furniture: HashMap::new(),
         };
         populate_defaults(&mut lib);
         lib
@@ -130,6 +191,7 @@ impl Library {
             items: HashMap::new(),
             body_plans: HashMap::new(),
             roles: HashMap::new(),
+            furniture: HashMap::new(),
         }
     }
 
@@ -159,6 +221,12 @@ impl Library {
                     .filter(|k| k.to_lowercase().contains(&q))
                     .map(|k| LibraryHit::Role(k.clone())),
             )
+            .chain(
+                self.furniture
+                    .keys()
+                    .filter(|k| k.to_lowercase().contains(&q))
+                    .map(|k| LibraryHit::Furniture(k.clone())),
+            )
             .collect();
         hits.sort();
         hits
@@ -170,6 +238,7 @@ impl Library {
             ("items", self.items.len()),
             ("body_plans", self.body_plans.len()),
             ("roles", self.roles.len()),
+            ("furniture", self.furniture.len()),
         ]
     }
 
@@ -193,6 +262,12 @@ impl Library {
 
     pub fn list_roles(&self) -> Vec<&str> {
         let mut v: Vec<&str> = self.roles.keys().map(String::as_str).collect();
+        v.sort();
+        v
+    }
+
+    pub fn list_furniture(&self) -> Vec<&str> {
+        let mut v: Vec<&str> = self.furniture.keys().map(String::as_str).collect();
         v.sort();
         v
     }
@@ -357,6 +432,92 @@ pub fn spawn_role_template(
     Ok(entity)
 }
 
+/// Options the caller can layer over a furniture template at spawn.
+#[derive(Default)]
+pub struct FurnitureSpawnOpts {
+    pub at: Pos,
+    pub kind_label: Option<String>,
+}
+
+/// Spawn a furniture entity from a template. Always positioned. The
+/// `Kind` defaults to the template name; pass `kind_label` to
+/// override (so you can have e.g. two different paintings named
+/// "Sunset Over Lake" and "Portrait of Mrs. Vance").
+pub fn spawn_furniture_template(
+    world: &mut World,
+    template_name: &str,
+    opts: FurnitureSpawnOpts,
+) -> Result<Entity, String> {
+    let template = {
+        let lib = world.resource::<Library>();
+        lib.furniture
+            .get(template_name)
+            .cloned()
+            .ok_or_else(|| format!("no furniture template: {template_name}"))?
+    };
+
+    let material_id = match &template.material {
+        Some(m) => Some(ensure_material(world, m)?),
+        None => None,
+    };
+
+    let label = opts.kind_label.unwrap_or_else(|| template_name.to_string());
+
+    let id = world
+        .spawn((
+            Position(opts.at),
+            Kind(label),
+            Furniture(template.kind),
+        ))
+        .id();
+
+    if let Some(mat) = material_id {
+        world.entity_mut(id).insert(ItemMaterial(mat));
+    }
+    if let Some(p) = template.powered {
+        let mut comp = if p.on {
+            Powered::on(p.label, p.source)
+        } else {
+            Powered::off(p.label, p.source)
+        };
+        if let Some((kind, loud)) = p.ambient {
+            comp = comp.with_ambient(kind, loud);
+        }
+        if p.heat_per_tick != 0.0 {
+            comp = comp.with_heat(p.heat_per_tick);
+        }
+        world.entity_mut(id).insert(comp);
+    }
+    if let Some(c) = template.container {
+        let comp = if c.locked {
+            Container::locked(c.lock_dc)
+        } else {
+            Container::unlocked()
+        };
+        world.entity_mut(id).insert(comp);
+    }
+    if let Some(w) = template.window {
+        let win = if w.closed {
+            Window::closed(template_name)
+        } else {
+            Window::open(template_name)
+        };
+        world.entity_mut(id).insert(win);
+    }
+    if let Some(p) = template.painting {
+        world
+            .entity_mut(id)
+            .insert(Painting::new(p.artist, p.title, p.value));
+    }
+    if let Some(r) = template.rug {
+        world.entity_mut(id).insert(Rug::new(template_name, r.friction));
+    }
+    if let Some(lumens) = template.light_lumens {
+        world.entity_mut(id).insert(LightSource { lumens });
+    }
+    Ok(id)
+}
+
 // ─── default population ────────────────────────────────────────────────────
 
 fn populate_defaults(lib: &mut Library) {
@@ -364,6 +525,7 @@ fn populate_defaults(lib: &mut Library) {
     populate_body_plans(lib);
     populate_items(lib);
     populate_roles(lib);
+    populate_furniture(lib);
 }
 
 fn populate_materials(lib: &mut Library) {
@@ -386,23 +548,48 @@ fn populate_materials(lib: &mut Library) {
         }
     };
     let entries = [
-        // structural
-        mat("wood",   true, 0.7, true,  0.55, 0.05, 0.0),
-        mat("stone",  true, 2.5, false, 0.70, 0.00, 0.0),
-        mat("brick",  true, 1.9, false, 0.65, 0.00, 0.0),
-        mat("steel",  true, 7.8, false, 0.50, 0.00, 0.0),
-        mat("iron",   true, 7.2, false, 0.50, 0.05, 0.0),
-        mat("glass",  true, 2.5, false, 0.40, 0.00, 0.0),
+        // structural — heavy
+        mat("wood",     true, 0.7, true,  0.55, 0.05, 0.0),
+        mat("oak",      true, 0.8, true,  0.60, 0.05, 0.0),
+        mat("hardwood", true, 0.8, true,  0.60, 0.04, 0.0),
+        mat("plywood",  true, 0.5, true,  0.55, 0.02, 0.0),
+        mat("pine",     true, 0.5, true,  0.55, 0.06, 0.0),
+        mat("stone",    true, 2.5, false, 0.70, 0.00, 0.0),
+        mat("granite",  true, 2.7, false, 0.55, 0.00, 0.0),
+        mat("marble",   true, 2.7, false, 0.45, 0.00, 0.0),
+        mat("brick",    true, 1.9, false, 0.65, 0.00, 0.0),
+        mat("concrete", true, 2.4, false, 0.70, 0.00, 0.0),
+        mat("drywall",  true, 0.7, true,  0.60, 0.00, 0.0),
+        mat("plaster",  true, 0.9, false, 0.60, 0.00, 0.0),
+        mat("steel",    true, 7.8, false, 0.50, 0.00, 0.0),
+        mat("iron",     true, 7.2, false, 0.50, 0.05, 0.0),
+        mat("aluminum", true, 2.7, false, 0.55, 0.00, 0.0),
+        mat("glass",    true, 2.5, false, 0.40, 0.00, 0.0),
+        // surfaces — floor coverings
+        mat("carpet",     false, 0.4, true, 0.85, 0.05, 0.0),
+        mat("tile",       true,  2.3, false, 0.45, 0.00, 0.0),
+        mat("linoleum",   false, 1.0, true,  0.55, 0.02, 0.0),
+        mat("hardwood_floor", true, 0.8, true, 0.55, 0.04, 0.0),
+        mat("wallpaper",  false, 0.2, true,  0.65, 0.00, 0.0),
+        mat("paint",      false, 0.1, true,  0.60, 0.05, 0.0),
         // soft / wearable
         mat("leather", false, 0.9, true, 0.85, 0.10, 0.0),
         mat("rubber",  false, 1.2, true, 0.95, 0.05, 0.0),
         mat("wool",    false, 0.3, true, 0.70, 0.05, 0.0),
         mat("cotton",  false, 0.4, true, 0.70, 0.00, 0.0),
+        mat("silk",    false, 0.3, true, 0.50, 0.05, 0.0),
+        mat("velvet",  false, 0.4, true, 0.80, 0.05, 0.0),
+        mat("denim",   false, 0.5, true, 0.70, 0.05, 0.0),
+        // foam / fillings
+        mat("foam",      false, 0.1, true, 0.80, 0.00, 0.0),
+        mat("polyester", false, 0.4, true, 0.75, 0.00, 0.0),
         // ground / vegetation
         mat("grass",  false, 0.1, true,  0.80, 0.05, 0.0),
         mat("soil",   false, 1.5, false, 0.70, 0.05, 0.0),
         mat("sand",   false, 1.6, false, 0.60, 0.00, 0.0),
         mat("dirt",   false, 1.4, false, 0.75, 0.05, 0.0),
+        mat("gravel", false, 1.7, false, 0.75, 0.00, 0.0),
+        mat("asphalt", true, 2.3, false, 0.65, 0.05, 0.0),
         // fluids / coatings — volatility drives smell decay
         mat("water",  false, 1.00, false, 0.40, 0.00, 0.40),
         mat("oil",    false, 0.90, true,  0.05, 0.30, 0.05),
@@ -411,10 +598,22 @@ fn populate_materials(lib: &mut Library) {
         mat("mud",    false, 1.50, false, 0.50, 0.10, 0.05),
         mat("urine",  false, 1.02, false, 0.30, 0.85, 0.20),
         mat("vomit",  false, 1.00, false, 0.35, 0.70, 0.15),
+        mat("wine",   false, 0.99, true,  0.30, 0.40, 0.20),
         // food
         mat("mashed_potato", false, 1.0, true, 0.30, 0.20, 0.10),
         mat("ketchup",       false, 1.1, false, 0.35, 0.30, 0.05),
         mat("oatmeal",       false, 0.9, true, 0.40, 0.15, 0.10),
+        mat("flour",         false, 0.5, true, 0.55, 0.10, 0.05),
+        mat("sugar",         false, 0.8, true, 0.45, 0.05, 0.05),
+        mat("coffee",        false, 0.8, true, 0.40, 0.50, 0.10),
+        // canvas — for paintings
+        mat("canvas",  false, 0.4, true, 0.65, 0.00, 0.0),
+        mat("paper",   false, 0.3, true, 0.65, 0.00, 0.0),
+        // ceramics / plastics / misc
+        mat("porcelain", true,  2.4, false, 0.40, 0.00, 0.0),
+        mat("ceramic",   true,  2.0, false, 0.45, 0.00, 0.0),
+        mat("plastic",   false, 0.9, true,  0.55, 0.00, 0.0),
+        mat("wax",       false, 0.9, true,  0.50, 0.10, 0.05),
     ];
     for m in entries {
         lib.materials.insert(m.name.clone(), m);
@@ -603,6 +802,323 @@ fn populate_roles(lib: &mut Library) {
     }
 }
 
+fn populate_furniture(lib: &mut Library) {
+    use FurnitureKind::*;
+
+    // Helper closures that build a template with sensible defaults.
+    fn base(kind: FurnitureKind, glyph: char, material: &str, desc: &str) -> FurnitureTemplate {
+        FurnitureTemplate {
+            kind,
+            glyph,
+            material: Some(material.into()),
+            powered: None,
+            container: None,
+            window: None,
+            painting: None,
+            rug: None,
+            light_lumens: None,
+            description: desc.into(),
+        }
+    }
+    fn pwr(label: &str, src: PowerSource, on: bool, ambient: Option<(SoundKind, f32)>, heat: f32)
+        -> PoweredSpec
+    {
+        PoweredSpec {
+            on,
+            source: src,
+            ambient,
+            heat_per_tick: heat,
+            label: label.into(),
+        }
+    }
+
+    let entries: &[(&str, FurnitureTemplate)] = &[
+        // ─── seating ──────────────────────────────────────────────
+        ("sofa",         base(Seating, 's', "velvet", "long upholstered couch")),
+        ("armchair",     base(Seating, 'a', "leather", "single-seat lounge chair")),
+        ("dining chair", base(Seating, 'h', "oak",   "wooden chair at the dining table")),
+        ("bench",        base(Seating, 'b', "oak",   "long bench in the foyer")),
+        ("ottoman",      base(Seating, 'o', "velvet", "footrest")),
+        ("recliner",     base(Seating, 'r', "leather", "reclining lounge chair")),
+
+        // ─── beds ─────────────────────────────────────────────────
+        ("king bed",   base(Bed, 'B', "oak", "king-size four-poster")),
+        ("queen bed",  base(Bed, 'B', "oak", "queen-size bed")),
+        ("twin bed",   base(Bed, 'b', "pine", "single twin")),
+        ("crib",       base(Bed, 'c', "pine", "infant crib")),
+
+        // ─── storage ───────────────────────────────────────────────
+        ("wardrobe",
+            FurnitureTemplate {
+                container: Some(ContainerSpec { locked: false, lock_dc: 0 }),
+                ..base(Storage, 'W', "oak", "tall closet wardrobe")
+            }),
+        ("dresser",
+            FurnitureTemplate {
+                container: Some(ContainerSpec { locked: false, lock_dc: 0 }),
+                ..base(Storage, 'D', "oak", "five-drawer dresser")
+            }),
+        ("locked dresser",
+            FurnitureTemplate {
+                container: Some(ContainerSpec { locked: true, lock_dc: 14 }),
+                ..base(Storage, 'D', "oak", "dresser with a locked top drawer")
+            }),
+        ("nightstand",
+            FurnitureTemplate {
+                container: Some(ContainerSpec { locked: false, lock_dc: 0 }),
+                ..base(Storage, 'n', "oak", "bedside nightstand with one drawer")
+            }),
+        ("bookshelf",
+            FurnitureTemplate {
+                container: Some(ContainerSpec { locked: false, lock_dc: 0 }),
+                ..base(Storage, 'L', "oak", "tall bookshelf")
+            }),
+        ("china cabinet",
+            FurnitureTemplate {
+                container: Some(ContainerSpec { locked: false, lock_dc: 0 }),
+                ..base(Storage, 'C', "oak", "glass-front china cabinet")
+            }),
+        ("safe",
+            FurnitureTemplate {
+                container: Some(ContainerSpec { locked: true, lock_dc: 22 }),
+                ..base(Storage, 'S', "steel", "wall safe")
+            }),
+        ("filing cabinet",
+            FurnitureTemplate {
+                container: Some(ContainerSpec { locked: false, lock_dc: 0 }),
+                ..base(Storage, 'f', "steel", "metal filing cabinet")
+            }),
+
+        // ─── tables ────────────────────────────────────────────────
+        ("dining table",  base(Table, 't', "oak", "long dining table")),
+        ("coffee table",  base(Table, 'c', "oak", "low living-room table")),
+        ("desk",          base(Table, 'd', "oak", "writing desk")),
+        ("kitchen island", base(Table, 'i', "granite", "kitchen island with stone top")),
+        ("side table",    base(Table, 's', "oak", "small side table")),
+
+        // ─── appliances ────────────────────────────────────────────
+        ("tv set",
+            FurnitureTemplate {
+                powered: Some(pwr("flatscreen TV", PowerSource::Mains, true,
+                    Some((SoundKind::Other("tv chatter".into()), 0.45)), 0.0)),
+                ..base(Appliance, 'T', "plastic", "wall-mounted flatscreen, currently on")
+            }),
+        ("tv off",
+            FurnitureTemplate {
+                powered: Some(pwr("flatscreen TV", PowerSource::Mains, false, None, 0.0)),
+                ..base(Appliance, 'T', "plastic", "wall-mounted flatscreen, off")
+            }),
+        ("stereo",
+            FurnitureTemplate {
+                powered: Some(pwr("stereo", PowerSource::Mains, false,
+                    Some((SoundKind::Other("music".into()), 0.40)), 0.0)),
+                ..base(Appliance, 'r', "plastic", "vintage stereo with vinyl player")
+            }),
+        ("refrigerator",
+            FurnitureTemplate {
+                powered: Some(pwr("refrigerator", PowerSource::Mains, true,
+                    Some((SoundKind::Other("hum".into()), 0.10)), -1.0)),
+                container: Some(ContainerSpec { locked: false, lock_dc: 0 }),
+                ..base(Appliance, 'F', "steel", "two-door fridge, humming")
+            }),
+        ("stove",
+            FurnitureTemplate {
+                powered: Some(pwr("gas stove", PowerSource::Gas, false, None, 5.0)),
+                ..base(Appliance, 'O', "steel", "gas range stove")
+            }),
+        ("stove on",
+            FurnitureTemplate {
+                powered: Some(pwr("gas stove", PowerSource::Gas, true,
+                    Some((SoundKind::Other("burner hiss".into()), 0.05)), 5.0)),
+                ..base(Appliance, 'O', "steel", "stove with two burners on")
+            }),
+        ("microwave",
+            FurnitureTemplate {
+                powered: Some(pwr("microwave", PowerSource::Mains, false, None, 0.0)),
+                ..base(Appliance, 'm', "steel", "countertop microwave")
+            }),
+        ("dishwasher",
+            FurnitureTemplate {
+                powered: Some(pwr("dishwasher", PowerSource::Mains, false, None, 0.0)),
+                ..base(Appliance, 'w', "steel", "built-in dishwasher")
+            }),
+        ("washer",
+            FurnitureTemplate {
+                powered: Some(pwr("washer", PowerSource::Mains, false, None, 0.0)),
+                ..base(Appliance, 'w', "steel", "front-loading washing machine")
+            }),
+        ("dryer",
+            FurnitureTemplate {
+                powered: Some(pwr("dryer", PowerSource::Mains, false, None, 0.0)),
+                ..base(Appliance, 'y', "steel", "tumble dryer")
+            }),
+        ("fireplace",
+            FurnitureTemplate {
+                powered: Some(pwr("fireplace", PowerSource::Fire, true,
+                    Some((SoundKind::Other("crackle".into()), 0.20)), 10.0)),
+                light_lumens: Some(800.0),
+                ..base(Appliance, '*', "brick", "stone fireplace, lit")
+            }),
+        ("fireplace cold",
+            FurnitureTemplate {
+                powered: Some(pwr("fireplace", PowerSource::Fire, false, None, 0.0)),
+                ..base(Appliance, '*', "brick", "stone fireplace, ashes only")
+            }),
+        ("ceiling fan",
+            FurnitureTemplate {
+                powered: Some(pwr("ceiling fan", PowerSource::Mains, true,
+                    Some((SoundKind::Other("whir".into()), 0.08)), 0.0)),
+                ..base(Appliance, 'F', "aluminum", "three-blade ceiling fan")
+            }),
+
+        // ─── plumbing ──────────────────────────────────────────────
+        ("toilet",   base(Plumbing, 'u', "porcelain", "porcelain toilet")),
+        ("bathroom sink", base(Plumbing, 'k', "porcelain", "pedestal sink")),
+        ("kitchen sink", base(Plumbing, 'K', "steel", "stainless double-basin sink")),
+        ("bathtub",  base(Plumbing, 'U', "porcelain", "claw-foot tub")),
+        ("shower",   base(Plumbing, 'H', "tile", "glass-walled shower")),
+
+        // ─── lighting ──────────────────────────────────────────────
+        ("table lamp",
+            FurnitureTemplate {
+                powered: Some(pwr("table lamp", PowerSource::Mains, true, None, 0.0)),
+                light_lumens: Some(600.0),
+                ..base(Lighting, 'l', "ceramic", "table lamp with linen shade")
+            }),
+        ("floor lamp",
+            FurnitureTemplate {
+                powered: Some(pwr("floor lamp", PowerSource::Mains, true, None, 0.0)),
+                light_lumens: Some(800.0),
+                ..base(Lighting, 'L', "iron", "tall arc floor lamp")
+            }),
+        ("chandelier",
+            FurnitureTemplate {
+                powered: Some(pwr("chandelier", PowerSource::Mains, true, None, 0.0)),
+                light_lumens: Some(2400.0),
+                ..base(Lighting, 'X', "iron", "crystal chandelier")
+            }),
+        ("sconce",
+            FurnitureTemplate {
+                powered: Some(pwr("sconce", PowerSource::Mains, true, None, 0.0)),
+                light_lumens: Some(300.0),
+                ..base(Lighting, 'i', "iron", "wall sconce")
+            }),
+
+        // ─── wall art ──────────────────────────────────────────────
+        ("painting",
+            FurnitureTemplate {
+                painting: Some(PaintingSpec {
+                    artist: "unknown".into(),
+                    title: "untitled landscape".into(),
+                    value: 200,
+                }),
+                ..base(WallArt, 'P', "canvas", "framed painting")
+            }),
+        ("oil portrait",
+            FurnitureTemplate {
+                painting: Some(PaintingSpec {
+                    artist: "Alana Vermeer".into(),
+                    title: "Portrait of Mrs. Vance".into(),
+                    value: 4500,
+                }),
+                ..base(WallArt, 'P', "canvas", "oil portrait, gilded frame")
+            }),
+        ("abstract canvas",
+            FurnitureTemplate {
+                painting: Some(PaintingSpec {
+                    artist: "Min Park".into(),
+                    title: "Red Sequence #4".into(),
+                    value: 18000,
+                }),
+                ..base(WallArt, 'P', "canvas", "modern abstract — bold reds")
+            }),
+        ("photograph",
+            FurnitureTemplate {
+                painting: Some(PaintingSpec {
+                    artist: "family".into(),
+                    title: "wedding day".into(),
+                    value: 0,
+                }),
+                ..base(WallArt, 'p', "paper", "framed family photo")
+            }),
+        ("mirror", base(WallArt, 'M', "glass", "wall mirror")),
+        ("wall clock", base(WallArt, 'C', "wood", "round wall clock")),
+
+        // ─── floor coverings ───────────────────────────────────────
+        ("persian rug",
+            FurnitureTemplate {
+                rug: Some(RugSpec { friction: 0.85 }),
+                ..base(FloorCovering, 'r', "wool", "patterned wool rug")
+            }),
+        ("kitchen mat",
+            FurnitureTemplate {
+                rug: Some(RugSpec { friction: 0.90 }),
+                ..base(FloorCovering, 'm', "rubber", "anti-fatigue kitchen mat")
+            }),
+        ("bath mat",
+            FurnitureTemplate {
+                rug: Some(RugSpec { friction: 0.85 }),
+                ..base(FloorCovering, 'm', "cotton", "bath mat")
+            }),
+
+        // ─── windows ───────────────────────────────────────────────
+        ("window",
+            FurnitureTemplate {
+                window: Some(WindowSpec { closed: true }),
+                ..base(Window, 'i', "glass", "window pane, closed")
+            }),
+        ("open window",
+            FurnitureTemplate {
+                window: Some(WindowSpec { closed: false }),
+                ..base(Window, '/', "glass", "window pane, open")
+            }),
+        ("sliding glass door",
+            FurnitureTemplate {
+                window: Some(WindowSpec { closed: true }),
+                ..base(Window, '|', "glass", "sliding glass door, closed")
+            }),
+        ("open sliding door",
+            FurnitureTemplate {
+                window: Some(WindowSpec { closed: false }),
+                ..base(Window, '/', "glass", "sliding glass door, open")
+            }),
+
+        // ─── decor ─────────────────────────────────────────────────
+        ("potted plant", base(Decor, '%', "plaster", "fern in a clay pot")),
+        ("vase",         base(Decor, 'v', "porcelain", "ceramic vase, dried flowers")),
+        ("books",        base(Decor, 'b', "paper", "stack of hardcovers")),
+        ("candle",
+            FurnitureTemplate {
+                light_lumens: Some(80.0),
+                ..base(Decor, 'c', "wax", "lit candle in a holder")
+            }),
+
+        // ─── structure ─────────────────────────────────────────────
+        ("staircase up",   base(Structure, '>', "oak", "carpeted staircase to upper floor")),
+        ("staircase down", base(Structure, '<', "oak", "staircase down to basement")),
+        ("column",         base(Structure, '|', "marble", "decorative marble column")),
+        ("railing",        base(Structure, '-', "oak", "wooden banister")),
+
+        // ─── outdoor ───────────────────────────────────────────────
+        ("grill",
+            FurnitureTemplate {
+                powered: Some(pwr("grill", PowerSource::Gas, false, None, 0.0)),
+                ..base(Outdoor, 'g', "steel", "propane grill")
+            }),
+        ("patio chair", base(Outdoor, 'h', "aluminum", "weather-resistant chair")),
+        ("patio table", base(Outdoor, 't', "aluminum", "round patio table")),
+        ("hammock",     base(Outdoor, '~', "cotton", "rope hammock between two posts")),
+        ("mailbox",     base(Outdoor, 'M', "aluminum", "curbside mailbox on a post")),
+        ("garden gnome", base(Outdoor, 'g', "ceramic", "smug little ceramic gnome")),
+        ("pool",        base(Outdoor, '~', "tile", "in-ground swimming pool")),
+        ("hot tub",     base(Outdoor, '@', "tile", "outdoor hot tub")),
+    ];
+
+    for (name, tmpl) in entries {
+        lib.furniture.insert((*name).into(), tmpl.clone());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -614,6 +1130,7 @@ mod tests {
         assert!(lib.items.len() >= 8);
         assert!(lib.body_plans.len() >= 3);
         assert!(lib.roles.len() >= 5);
+        assert!(lib.furniture.len() >= 20);
     }
 
     #[test]
