@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use bevy_ecs::resource::Resource;
+
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Default)]
 pub struct Pos {
     pub x: i32,
@@ -121,13 +123,15 @@ impl Default for Chunk {
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
 pub struct ChunkCoord(pub i32, pub i32, pub i32);
 
-pub struct World {
+/// The voxel grid resource. Owned by the bevy ECS world as a `Resource`.
+#[derive(Resource)]
+pub struct VoxelWorld {
     chunks: HashMap<ChunkCoord, Chunk>,
     materials: Vec<Material>,
     name_to_material: HashMap<String, MaterialId>,
 }
 
-impl World {
+impl VoxelWorld {
     pub fn new() -> Self {
         let mut world = Self {
             chunks: HashMap::new(),
@@ -202,7 +206,7 @@ impl World {
     }
 }
 
-impl Default for World {
+impl Default for VoxelWorld {
     fn default() -> Self {
         Self::new()
     }
@@ -223,7 +227,7 @@ fn chunk_index(pos: Pos) -> (ChunkCoord, usize) {
 mod tests {
     use super::*;
 
-    fn stone(world: &mut World) -> MaterialId {
+    fn stone(world: &mut VoxelWorld) -> MaterialId {
         world.register_material(Material {
             name: "stone".into(),
             solid: true,
@@ -234,7 +238,7 @@ mod tests {
 
     #[test]
     fn voxels_round_trip_across_chunk_boundaries() {
-        let mut world = World::new();
+        let mut world = VoxelWorld::new();
         let stone = stone(&mut world);
         let positions = [
             Pos::new(0, 0, 0),
@@ -254,7 +258,7 @@ mod tests {
 
     #[test]
     fn floor_is_walkable_but_not_solid() {
-        let mut world = World::new();
+        let mut world = VoxelWorld::new();
         let stone = stone(&mut world);
         let p = Pos::new(0, 0, 0);
         world.set_voxel(p, Voxel::floor(stone));
@@ -264,7 +268,7 @@ mod tests {
 
     #[test]
     fn empty_tile_walkable_only_with_support() {
-        let mut world = World::new();
+        let mut world = VoxelWorld::new();
         let stone = stone(&mut world);
         let p = Pos::new(0, 0, 0);
         // No support below — empty floats.
@@ -276,7 +280,7 @@ mod tests {
 
     #[test]
     fn wall_is_solid_and_unwalkable() {
-        let mut world = World::new();
+        let mut world = VoxelWorld::new();
         let stone = stone(&mut world);
         let p = Pos::new(0, 0, 0);
         world.set_voxel(p, Voxel::wall(stone));

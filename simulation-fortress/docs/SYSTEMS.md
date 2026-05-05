@@ -17,14 +17,24 @@ need to answer. Edit freely.
 
 ## Architectural ground rules
 
-- Engine code lives in `crates/engine` and has no third-party
-  dependencies yet. Add deps deliberately.
-- Scenarios live in `crates/scenarios` and depend on the engine. Each
-  scenario is a `Scenario` impl: `setup` builds the world, `tick`
-  advances behavior, `is_complete` ends the run.
+- Engine code lives in `crates/engine` and depends on `bevy_ecs` for
+  the entity-component-system core. Other deps stay deliberately
+  minimal so we can keep iterating on simulation details rather than
+  fighting integrations.
+- The simulation owns one `bevy_ecs::World`. Voxel terrain, the clock,
+  and the event log live as `Resource`s on it; creatures and items
+  live as entities with components.
+- Scenarios live in `crates/scenarios`. Each scenario is a `Scenario`
+  impl: `setup` populates the world, `build_schedule` returns a bevy
+  `Schedule` of systems that run once per tick, `is_complete` ends
+  the run.
+- Per-tick logic is written as ECS systems (`fn(Res<X>, Query<...>)`
+  signatures), not free functions. Scenarios can register their own
+  components, resources, and events on the world during setup.
 - Rendering is decoupled via the `Renderer` trait. The CLI/ASCII
-  renderer is the only one today; future renderers (TUI, graphical)
-  live in their own crates and never get pulled into the engine.
+  renderer plus a prose `LogRenderer` are the only ones today; future
+  renderers (TUI, graphical) live in their own crates and never get
+  pulled into the engine.
 - Time is integer ticks. A "tick" is the smallest indivisible step;
   scenarios decide what real-world duration that maps to.
 - Coordinates are integer voxel cells (`Pos { x, y, z }`). Sub-voxel
@@ -97,19 +107,21 @@ Open questions:
 
 ## 4. Individuals (creatures, agents) — partial
 
-Today: `Entity { id, kind, position, health, faction, alive, data }`.
-The `data: HashMap<String, String>` field is an escape hatch for
-scenario-specific fields until we promote them to first-class.
+Creatures are bevy ECS entities with a small set of standard
+components: `Kind` (string label), `Position`, `Health { current, max }`,
+optional `Faction`, optional `ExtraData` (string-keyed escape hatch).
+Scenarios add their own marker components like `Intruder`, `Family`,
+`Conscript` to drive system queries.
 
-Code: `crates/engine/src/entity.rs`
+Code: `crates/engine/src/components.rs`
 
-Promotions to consider:
+Adding new aspects of a creature is just a new `Component`:
 
-- `body: Body` (anatomy — see §5).
-- `mind: Mind` (personality, mood, memories — see §6, §8).
-- `inventory: Inventory` (see §9).
-- `skills: Skills` (see §10).
-- `species: SpeciesId` for shared traits across many entities.
+- Anatomy → `Body` component plus a tree of body-part child entities (§5).
+- Mind → `Personality`, `Mood`, `Memory` components (§6, §8).
+- Skills → `Skills(HashMap<SkillId, u16>)` component (§10).
+- Species → `Species(SpeciesId)` for shared traits across many
+  individuals.
 
 ## 5. Anatomy & wounds — planned
 
@@ -170,19 +182,53 @@ Open questions:
 - How much is persisted vs. forgotten over time?
 - Indexing: how do we ask "did Alice witness Bob's death"?
 
-## 9. Items & inventory — planned
+## 9. Items, inventory & clothing — partial
 
-Items are entities-lite: position (or carrier), material, quality,
-durability, optional behavior. A crowbar, a rifle, a cookie — same
-substrate.
+Items are full ECS entities tagged with the `Item` marker plus an
+`ItemName` and whichever physical-trait components apply. The trait
+set is open and grows by adding new `Component`s rather than editing
+the engine. Today's traits:
+
+- `Mass(f32)` — kilograms.
+- `Temperature(f32)` — degrees Celsius (passive; equilibration system
+  pending).
+- `ThermalConductivity(f32)` — W/(m·K).
+- `ElectricalConductivity(f32)` — S/m (loose order-of-magnitude
+  number, not strictly unit-checked).
+- `Texture` — enum (Smooth, Rough, Coarse, Soft, Sharp, Slick,
+  Sticky, Furry, Polished, Bumpy).
+- `ItemMaterial(MaterialId)` — link back to the material registry.
+
+Carrying & wearing:
+
+- `Inventory(Vec<Entity>)` on a creature lists items they carry
+  loosely.
+- `Wearing(HashMap<BodySlot, Entity>)` lists currently equipped items
+  by body slot. Slots: Head, Torso, Legs, Feet, Hands, MainHand,
+  OffHand, Back.
+- Items declare where they go via `Wearable(BodySlot)`.
+- Helpers `give_item`, `equip_item`, `unequip_item`, `drop_item` keep
+  the components consistent and emit `ItemTaken`, `ItemEquipped`,
+  `ItemUnequipped`, `ItemDropped` events.
+
+Code: `crates/engine/src/items.rs`
+
+Demonstrated in the home invasion scenario: residents wear a wool
+shirt (Torso) + leather boots (Feet); the intruder grips a steel
+crowbar (MainHand). Each piece has full physical-trait components,
+ready to feed into combat (§13), thermal (future), and electrical
+systems.
 
 Open questions:
 
-- Items as full entities vs. a separate `Item` type?
 - Stacks (50 arrows) vs. discrete items.
-- Containers (pockets, boxes, barrels) — recursive inventory tree.
-- Wear & repair — same `damage` byte as voxels, or its own model?
+- Containers (pockets, boxes, barrels) — recursive entity hierarchy
+  via bevy ECS relationships.
+- Wear & repair — `Damage(u8)` component, or shared with voxel damage?
 - Crafting / decomposition — recipes as data, or scenario code?
+- Clothing layers (long underwear under a coat under a cloak) — a
+  list of items per slot rather than a single entity.
+- Hot/cold transfer between worn items, body, and environment.
 
 ## 10. Skills & learning — planned
 
@@ -364,23 +410,22 @@ Defer until we know what real scenarios need.
 
 ## How systems compose — example: home invasion
 
-The current home-invasion scenario only exercises §1, §2, §4, §12,
-§18. To make it richer we'd pull in:
+The current home-invasion scenario exercises §1, §2, §4, §9, §12,
+§14, §17, §18. To make it richer we'd pull in:
 
 - §5 (anatomy): the intruder breaks a resident's arm before killing
   them; injured residents fight worse.
 - §6 (personality): one resident is a coward and tries to hide; one
   is brave and charges.
-- §9 (items): resident grabs a kitchen knife from the counter on the
-  way past.
 - §10 (skills): firearms skill on a homeowner with a pistol.
 - §11 (needs): if the simulation ran long enough, residents would
   also need to eat and sleep — usually irrelevant to a 5-minute
   invasion.
-- §13 (combat): replace the hard-coded damage with anatomy-driven
-  resolution.
-- §17 (events): every blow, scream, and death emits an event the
-  renderer can flash on screen.
+- §13 (combat): replace the hard-coded damage with resolution that
+  factors in held weapon mass + texture (already on the crowbar)
+  versus worn armor's thermal/elastic properties.
+- §17 (events): every blow, scream, and death already emits an event;
+  next step is to flash overlays on the renderer.
 
 That layering is the point: each new system adds depth across every
 scenario without rewriting them.

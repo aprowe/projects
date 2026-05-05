@@ -1,17 +1,15 @@
 use std::time::Duration;
 
-use crate::entity::EntityStore;
+use bevy_ecs::prelude::World;
+
 use crate::log::EventLog;
-use crate::render::{NullRenderer, Renderer, SimulationView};
-use crate::scenario::{Scenario, SetupContext, TickContext};
+use crate::render::{NullRenderer, Renderer};
+use crate::scenario::Scenario;
 use crate::time::{Clock, Tick};
-use crate::world::World;
+use crate::world::VoxelWorld;
 
 pub struct Simulation {
     pub world: World,
-    pub entities: EntityStore,
-    pub clock: Clock,
-    pub log: EventLog,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -49,42 +47,25 @@ impl Default for RunOptions {
 
 impl Simulation {
     pub fn new() -> Self {
-        Self {
-            world: World::new(),
-            entities: EntityStore::default(),
-            clock: Clock::new(),
-            log: EventLog::new(),
-        }
+        let mut world = World::new();
+        world.insert_resource(VoxelWorld::new());
+        world.insert_resource(Clock::default());
+        world.insert_resource(EventLog::default());
+        Self { world }
     }
 
-    pub fn view(&self) -> SimulationView<'_> {
-        SimulationView {
-            world: &self.world,
-            entities: &self.entities,
-            log: &self.log,
-        }
+    pub fn current_tick(&self) -> Tick {
+        self.world.resource::<Clock>().tick
     }
 
-    /// Advance the clock by one tick and call the scenario's `tick` hook.
-    pub fn step<S: Scenario>(&mut self, scenario: &mut S) -> Tick {
-        let tick = self.clock.advance();
-        let mut ctx = TickContext {
-            world: &mut self.world,
-            entities: &mut self.entities,
-            log: &mut self.log,
-            tick,
-        };
-        scenario.tick(&mut ctx);
-        tick
-    }
-
-    /// Run the scenario headlessly with default options.
+    /// Run the scenario headlessly with the given options.
     pub fn run<S: Scenario>(&mut self, scenario: &mut S, options: RunOptions) -> Tick {
         self.run_with(scenario, options, &mut NullRenderer)
     }
 
-    /// Run the scenario, calling `renderer.frame` after setup and after
-    /// every tick. Stops early if the scenario reports completion.
+    /// Run the scenario with a renderer attached. The renderer is invoked
+    /// after `setup` (tick 0) and after every subsequent tick. The loop
+    /// stops early when `Scenario::is_complete` returns true.
     pub fn run_with<S, R>(
         &mut self,
         scenario: &mut S,
@@ -95,30 +76,26 @@ impl Simulation {
         S: Scenario,
         R: Renderer,
     {
-        {
-            let mut ctx = SetupContext {
-                world: &mut self.world,
-                entities: &mut self.entities,
-                log: &mut self.log,
-            };
-            scenario.setup(&mut ctx);
-        }
-        renderer.frame(&self.view(), 0);
+        scenario.setup(&mut self.world);
+        let mut schedule = scenario.build_schedule();
+        renderer.frame(&mut self.world, 0);
         if let Some(pace) = options.pacing {
             std::thread::sleep(pace);
         }
 
         for _ in 0..options.max_ticks {
-            let tick = self.step(scenario);
-            renderer.frame(&self.view(), tick);
-            if scenario.is_complete(&self.world, &self.entities, tick) {
+            self.world.resource_mut::<Clock>().advance();
+            schedule.run(&mut self.world);
+            let tick = self.current_tick();
+            renderer.frame(&mut self.world, tick);
+            if scenario.is_complete(&mut self.world) {
                 break;
             }
             if let Some(pace) = options.pacing {
                 std::thread::sleep(pace);
             }
         }
-        self.clock.tick
+        self.current_tick()
     }
 }
 

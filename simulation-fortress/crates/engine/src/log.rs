@@ -1,11 +1,13 @@
 //! Structured event log for the simulation.
 //!
-//! Every interesting thing that happens — entities spawning, moving, taking
-//! damage, dying; voxels changing; free-form scenario notes — is pushed onto
-//! the `EventLog` as a typed `Event`. Renderers and post-run analysis read
-//! from the log; the `LogRenderer` turns events into prose narration.
+//! The `EventLog` is a bevy ECS `Resource` that lives on the simulation
+//! world. Engine helpers and scenario systems push typed events onto it;
+//! renderers read from it to produce narration and post-run summaries.
 
-use crate::entity::{EntityId, EntityStore};
+use bevy_ecs::prelude::{Entity, Resource, World};
+
+use crate::components::Kind;
+use crate::items::{BodySlot, ItemName};
 use crate::time::Tick;
 use crate::world::{MaterialId, Pos};
 
@@ -14,25 +16,25 @@ pub enum Event {
     /// Free-form prose injected by a scenario.
     Note(String),
     EntitySpawned {
-        id: EntityId,
+        entity: Entity,
         kind: String,
         faction: Option<String>,
         at: Pos,
     },
     EntityMoved {
-        id: EntityId,
+        entity: Entity,
         from: Pos,
         to: Pos,
     },
     EntityAttacked {
-        attacker: Option<EntityId>,
-        target: EntityId,
+        attacker: Option<Entity>,
+        target: Entity,
         damage: i32,
         remaining_health: i32,
     },
     EntityKilled {
-        id: EntityId,
-        by: Option<EntityId>,
+        entity: Entity,
+        by: Option<Entity>,
     },
     VoxelChanged {
         at: Pos,
@@ -43,9 +45,28 @@ pub enum Event {
         max: Pos,
         material: MaterialId,
     },
+    ItemTaken {
+        taker: Entity,
+        item: Entity,
+    },
+    ItemEquipped {
+        wearer: Entity,
+        item: Entity,
+        slot: BodySlot,
+    },
+    ItemUnequipped {
+        wearer: Entity,
+        item: Entity,
+        slot: BodySlot,
+    },
+    ItemDropped {
+        dropper: Entity,
+        item: Entity,
+        at: Pos,
+    },
 }
 
-#[derive(Default)]
+#[derive(Resource, Default)]
 pub struct EventLog {
     events: Vec<(Tick, Event)>,
 }
@@ -79,12 +100,13 @@ impl EventLog {
     }
 }
 
-/// Render a single event as a sentence using entity state for labels.
-pub fn narrate(event: &Event, entities: &EntityStore) -> String {
+/// Render a single event as a sentence using the bevy world for entity
+/// labels (looks up `Kind` components).
+pub fn narrate(event: &Event, world: &World) -> String {
     match event {
         Event::Note(msg) => msg.clone(),
         Event::EntitySpawned {
-            id: _,
+            entity: _,
             kind,
             faction,
             at,
@@ -98,10 +120,10 @@ pub fn narrate(event: &Event, entities: &EntityStore) -> String {
                 at.x, at.y, at.z
             )
         }
-        Event::EntityMoved { id, from, to } => {
-            let label = label(*id, entities);
+        Event::EntityMoved { entity, from, to } => {
+            let l = label(*entity, world);
             let dir = direction(*from, *to);
-            format!("{label} steps {dir} to ({}, {}, {}).", to.x, to.y, to.z)
+            format!("{l} steps {dir} to ({}, {}, {}).", to.x, to.y, to.z)
         }
         Event::EntityAttacked {
             attacker,
@@ -110,18 +132,18 @@ pub fn narrate(event: &Event, entities: &EntityStore) -> String {
             remaining_health,
         } => {
             let attacker_label = attacker
-                .map(|a| label(a, entities))
+                .map(|a| label(a, world))
                 .unwrap_or_else(|| "Something unseen".into());
-            let target_label = label(*target, entities);
+            let target_label = label(*target, world);
             format!(
                 "{attacker_label} strikes {target_label} for {damage} damage (target now at {remaining_health} hp)."
             )
         }
-        Event::EntityKilled { id, by } => {
-            let target_label = label(*id, entities);
+        Event::EntityKilled { entity, by } => {
+            let target_label = label(*entity, world);
             match by {
                 Some(b) => {
-                    let by_label = label(*b, entities);
+                    let by_label = label(*b, world);
                     format!("{target_label} collapses, killed by {by_label}.")
                 }
                 None => format!("{target_label} dies."),
@@ -135,13 +157,55 @@ pub fn narrate(event: &Event, entities: &EntityStore) -> String {
             "Voxels from ({}, {}, {}) to ({}, {}, {}) are filled with material #{material}.",
             min.x, min.y, min.z, max.x, max.y, max.z
         ),
+        Event::ItemTaken { taker, item } => {
+            format!(
+                "{} picks up {}.",
+                label(*taker, world),
+                item_label(*item, world)
+            )
+        }
+        Event::ItemEquipped {
+            wearer,
+            item,
+            slot,
+        } => format!(
+            "{} equips {} on the {}.",
+            label(*wearer, world),
+            item_label(*item, world),
+            slot.label()
+        ),
+        Event::ItemUnequipped {
+            wearer,
+            item,
+            slot,
+        } => format!(
+            "{} removes {} from the {}.",
+            label(*wearer, world),
+            item_label(*item, world),
+            slot.label()
+        ),
+        Event::ItemDropped { dropper, item, at } => format!(
+            "{} drops {} at ({}, {}, {}).",
+            label(*dropper, world),
+            item_label(*item, world),
+            at.x,
+            at.y,
+            at.z
+        ),
     }
 }
 
-fn label(id: EntityId, entities: &EntityStore) -> String {
-    match entities.get(id) {
-        Some(e) => format!("{}#{}", e.kind, e.id.0),
-        None => format!("entity#{}", id.0),
+fn item_label(item: Entity, world: &World) -> String {
+    match world.get::<ItemName>(item) {
+        Some(n) => format!("a {}", n.0),
+        None => format!("item#{}", item.index()),
+    }
+}
+
+fn label(entity: Entity, world: &World) -> String {
+    match world.get::<Kind>(entity) {
+        Some(k) => format!("{}#{}", k.0, entity.index()),
+        None => format!("entity#{}", entity.index()),
     }
 }
 

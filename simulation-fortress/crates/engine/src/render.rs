@@ -1,46 +1,42 @@
-//! Rendering hooks. The engine exposes a generic `Renderer` trait, an
-//! ASCII voxel renderer for the command line, and a prose `LogRenderer`
-//! that narrates the event log. Other renderers (TUI, graphical) can
-//! implement the same trait without the engine ever depending on them.
+//! Rendering hooks. Renderers receive `&mut World` so they can run
+//! ECS queries; they are expected to be effectively read-only by
+//! convention. Two concrete renderers ship today: `AsciiRenderer` for
+//! the voxel map, `LogRenderer` for prose narration. `CompositeRenderer`
+//! runs two renderers per frame.
 
 use std::collections::HashMap;
 
-use crate::entity::EntityStore;
+use bevy_ecs::prelude::World;
+
+use crate::components::{Faction, Health, Kind, Position};
 use crate::log::{narrate, EventLog};
 use crate::time::Tick;
-use crate::world::{MaterialId, Pos, TileKind, World};
-
-/// Read-only window into the simulation, passed to renderers.
-pub struct SimulationView<'a> {
-    pub world: &'a World,
-    pub entities: &'a EntityStore,
-    pub log: &'a EventLog,
-}
+use crate::world::{MaterialId, Pos, TileKind, VoxelWorld};
 
 pub trait Renderer {
     /// Called once at tick 0 (after scenario setup) and after every tick.
-    fn frame(&mut self, view: &SimulationView<'_>, tick: Tick);
+    fn frame(&mut self, world: &mut World, tick: Tick);
 }
 
 /// A no-op renderer for headless runs.
 pub struct NullRenderer;
 
 impl Renderer for NullRenderer {
-    fn frame(&mut self, _view: &SimulationView<'_>, _tick: Tick) {}
+    fn frame(&mut self, _world: &mut World, _tick: Tick) {}
 }
 
 /// Run two renderers in sequence on each frame.
 pub struct CompositeRenderer<A: Renderer, B: Renderer>(pub A, pub B);
 
 impl<A: Renderer, B: Renderer> Renderer for CompositeRenderer<A, B> {
-    fn frame(&mut self, view: &SimulationView<'_>, tick: Tick) {
-        self.0.frame(view, tick);
-        self.1.frame(view, tick);
+    fn frame(&mut self, world: &mut World, tick: Tick) {
+        self.0.frame(world, tick);
+        self.1.frame(world, tick);
     }
 }
 
-/// Renders a single Z-slice of the world as ASCII to stdout. Entities on
-/// the slice are overlaid on top of voxel glyphs.
+/// Renders a single Z-slice of the world as ASCII to stdout. Living
+/// entities on the slice are overlaid on top of voxel glyphs.
 pub struct AsciiRenderer {
     pub min: Pos,
     pub max: Pos,
@@ -74,16 +70,6 @@ impl AsciiRenderer {
         }
     }
 
-    pub fn floor_glyph(mut self, glyph: char) -> Self {
-        self.floor_glyph = glyph;
-        self
-    }
-
-    pub fn ramp_glyph(mut self, glyph: char) -> Self {
-        self.ramp_glyph = glyph;
-        self
-    }
-
     pub fn at_z(mut self, z: i32) -> Self {
         self.z = z;
         self
@@ -109,8 +95,18 @@ impl AsciiRenderer {
         self
     }
 
-    fn glyph_for_voxel(&self, world: &World, pos: Pos) -> char {
-        let voxel = world.voxel(pos);
+    pub fn floor_glyph(mut self, glyph: char) -> Self {
+        self.floor_glyph = glyph;
+        self
+    }
+
+    pub fn ramp_glyph(mut self, glyph: char) -> Self {
+        self.ramp_glyph = glyph;
+        self
+    }
+
+    fn glyph_for_voxel(&self, voxel_world: &VoxelWorld, pos: Pos) -> char {
+        let voxel = voxel_world.voxel(pos);
         match voxel.kind {
             TileKind::Empty => self.air_glyph,
             TileKind::Floor => self.floor_glyph,
@@ -122,45 +118,44 @@ impl AsciiRenderer {
                 .unwrap_or(self.default_solid_glyph),
         }
     }
-
-    fn glyph_for_entity_kind(&self, kind: &str) -> Option<char> {
-        self.entity_kind_glyphs.get(kind).copied()
-    }
-
-    fn glyph_for_faction(&self, faction: &str) -> Option<char> {
-        self.faction_glyphs.get(faction).copied()
-    }
 }
 
 impl Renderer for AsciiRenderer {
-    fn frame(&mut self, view: &SimulationView<'_>, tick: Tick) {
+    fn frame(&mut self, world: &mut World, tick: Tick) {
         if tick != 0 && !tick.is_multiple_of(self.frame_every) {
             return;
         }
 
         let mut overlay: HashMap<(i32, i32), char> = HashMap::new();
-        for entity in view.entities.iter() {
-            if !entity.is_alive() || entity.position.z != self.z {
+        let mut total = 0usize;
+        let mut alive = 0usize;
+        let mut q = world.query::<(&Kind, &Position, &Health, Option<&Faction>)>();
+        for (kind, pos, health, faction) in q.iter(world) {
+            total += 1;
+            if !health.is_alive() {
+                continue;
+            }
+            alive += 1;
+            if pos.0.z != self.z {
                 continue;
             }
             let glyph = self
-                .glyph_for_entity_kind(&entity.kind)
+                .entity_kind_glyphs
+                .get(&kind.0)
+                .copied()
                 .or_else(|| {
-                    entity
-                        .faction
-                        .as_deref()
-                        .and_then(|f| self.glyph_for_faction(f))
+                    faction
+                        .and_then(|f| self.faction_glyphs.get(&f.0).copied())
                 })
                 .unwrap_or(self.default_entity_glyph);
-            overlay.insert((entity.position.x, entity.position.y), glyph);
+            overlay.insert((pos.0.x, pos.0.y), glyph);
         }
 
-        let alive = view.entities.iter().filter(|e| e.is_alive()).count();
+        let voxel_world = world.resource::<VoxelWorld>();
+
         println!(
             "── tick {tick:>4} ── z={} ── entities {}/{} alive ──",
-            self.z,
-            alive,
-            view.entities.len()
+            self.z, alive, total
         );
         for y in self.min.y..=self.max.y {
             let mut row = String::with_capacity((self.max.x - self.min.x + 1) as usize);
@@ -168,7 +163,7 @@ impl Renderer for AsciiRenderer {
                 let glyph = overlay
                     .get(&(x, y))
                     .copied()
-                    .unwrap_or_else(|| self.glyph_for_voxel(view.world, Pos::new(x, y, self.z)));
+                    .unwrap_or_else(|| self.glyph_for_voxel(voxel_world, Pos::new(x, y, self.z)));
                 row.push(glyph);
             }
             println!("{row}");
@@ -193,15 +188,20 @@ impl Default for LogRenderer {
 }
 
 impl Renderer for LogRenderer {
-    fn frame(&mut self, view: &SimulationView<'_>, tick: Tick) {
-        let events: Vec<_> = view.log.events_at(tick).collect();
+    fn frame(&mut self, world: &mut World, tick: Tick) {
         let header = if tick == 0 {
             "Setup".to_string()
         } else {
             format!("Tick {tick}")
         };
 
-        if events.is_empty() {
+        let events: Vec<crate::log::Event> = {
+            let log = world.resource::<EventLog>();
+            log.events_at(tick).cloned().collect()
+        };
+        let sentences: Vec<String> = events.iter().map(|e| narrate(e, world)).collect();
+
+        if sentences.is_empty() {
             if self.announce_quiet {
                 println!(
                     "[{header}] A quiet moment passes; nothing of consequence is recorded.\n"
@@ -210,7 +210,6 @@ impl Renderer for LogRenderer {
             return;
         }
 
-        let sentences: Vec<String> = events.iter().map(|e| narrate(e, view.entities)).collect();
         println!("[{header}] {}\n", sentences.join(" "));
     }
 }

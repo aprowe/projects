@@ -8,7 +8,7 @@
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap};
 
-use crate::world::{Pos, World};
+use crate::world::{Pos, VoxelWorld};
 
 const NEIGHBORS_2D: &[(i32, i32)] = &[
     (-1, -1), (0, -1), (1, -1),
@@ -43,7 +43,7 @@ impl PartialOrd for Node {
 /// Returns `None` if no path exists, the goal is not walkable, or the
 /// search exceeds `max_iter` expansions. The returned path includes
 /// both `start` and `goal` (so `path[1]` is the first step).
-pub fn find_path(world: &World, start: Pos, goal: Pos, max_iter: usize) -> Option<Vec<Pos>> {
+pub fn find_path(world: &VoxelWorld, start: Pos, goal: Pos, max_iter: usize) -> Option<Vec<Pos>> {
     if start == goal {
         return Some(vec![start]);
     }
@@ -133,7 +133,7 @@ mod tests {
     use super::*;
     use crate::world::{Material, MaterialId, Voxel};
 
-    fn stone(world: &mut World) -> MaterialId {
+    fn stone(world: &mut VoxelWorld) -> MaterialId {
         world.register_material(Material {
             name: "stone".into(),
             solid: true,
@@ -142,7 +142,7 @@ mod tests {
         })
     }
 
-    fn floor_grid(world: &mut World, mat: MaterialId, w: i32, h: i32) {
+    fn floor_grid(world: &mut VoxelWorld, mat: MaterialId, w: i32, h: i32) {
         for x in 0..w {
             for y in 0..h {
                 world.set_voxel(Pos::new(x, y, 0), Voxel::floor(mat));
@@ -152,7 +152,7 @@ mod tests {
 
     #[test]
     fn straight_path_on_open_floor() {
-        let mut world = World::new();
+        let mut world = VoxelWorld::new();
         let stone = stone(&mut world);
         floor_grid(&mut world, stone, 5, 1);
         let path = find_path(&world, Pos::new(0, 0, 0), Pos::new(4, 0, 0), 1024).unwrap();
@@ -163,7 +163,7 @@ mod tests {
 
     #[test]
     fn detours_around_a_wall_through_a_doorway() {
-        let mut world = World::new();
+        let mut world = VoxelWorld::new();
         let stone = stone(&mut world);
         floor_grid(&mut world, stone, 5, 5);
         // Wall down the middle column except at y=2 (the doorway).
@@ -180,7 +180,7 @@ mod tests {
 
     #[test]
     fn diagonal_corner_cutting_is_forbidden() {
-        let mut world = World::new();
+        let mut world = VoxelWorld::new();
         let stone = stone(&mut world);
         floor_grid(&mut world, stone, 2, 2);
         // Walls in the two cardinal cells that flank the diagonal.
@@ -193,7 +193,7 @@ mod tests {
 
     #[test]
     fn unreachable_returns_none() {
-        let mut world = World::new();
+        let mut world = VoxelWorld::new();
         let stone = stone(&mut world);
         world.set_voxel(Pos::new(0, 0, 0), Voxel::floor(stone));
         let path = find_path(&world, Pos::new(0, 0, 0), Pos::new(5, 5, 0), 1024);
@@ -202,7 +202,7 @@ mod tests {
 
     #[test]
     fn unwalkable_goal_returns_none() {
-        let mut world = World::new();
+        let mut world = VoxelWorld::new();
         let stone = stone(&mut world);
         floor_grid(&mut world, stone, 3, 3);
         world.set_voxel(Pos::new(2, 2, 0), Voxel::wall(stone));

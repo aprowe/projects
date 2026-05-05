@@ -13,4 +13,5 @@ name = "fortress"
 path = "src/main.rs"
 
 [dependencies]
+bevy_ecs = "0.18"
 fortress-engine = { path = "../engine" }

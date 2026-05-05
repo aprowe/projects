@@ -9,3 +9,4 @@ description = "Voxel-based simulation engine for Dwarf-Fortress-style scenarios"
 workspace = true
 
 [dependencies]
+bevy_ecs = "0.18"

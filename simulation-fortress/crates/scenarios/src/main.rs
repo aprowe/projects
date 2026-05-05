@@ -2,7 +2,8 @@ use std::env;
 use std::time::Duration;
 
 use fortress_engine::{
-    AsciiRenderer, CompositeRenderer, LogRenderer, Pos, RunOptions, Scenario, Simulation,
+    AsciiRenderer, CompositeRenderer, EventLog, Faction, Health, Item, ItemName, Kind,
+    LogRenderer, Position, Pos, RunOptions, Scenario, Simulation, VoxelWorld, Wearing,
 };
 
 mod home_invasion;
@@ -48,7 +49,7 @@ fn main() {
     let mut sim = Simulation::new();
     let final_tick = match scenario_name.as_str() {
         "home_invasion" => {
-            let mut scenario = home_invasion::HomeInvasion::default();
+            let mut scenario = home_invasion::HomeInvasion;
             let log = LogRenderer::default();
             let ascii = AsciiRenderer::new(Pos::new(-1, -4, 0), Pos::new(8, 8, 0))
                 .at_z(0)
@@ -57,7 +58,7 @@ fn main() {
                 .faction("family", 'f');
             let mut renderer = CompositeRenderer(log, ascii);
             let t = sim.run_with(&mut scenario, options, &mut renderer);
-            print_summary(&scenario, &sim, t);
+            print_summary(&scenario, &mut sim, t);
             t
         }
         other => {
@@ -70,22 +71,67 @@ fn main() {
     println!("done at tick {final_tick}");
 }
 
-fn print_summary<S: Scenario>(scenario: &S, sim: &Simulation, tick: u64) {
+fn print_summary<S: Scenario>(scenario: &S, sim: &mut Simulation, tick: u64) {
     println!("=== summary ===");
     println!("scenario:    {}", scenario.name());
     println!("ticks:       {tick}");
-    println!("chunks:      {}", sim.world.chunk_count());
-    println!("entities:    {}", sim.entities.len());
-    println!("log entries: {}", sim.log.len());
-    let alive = sim.entities.iter().filter(|e| e.is_alive()).count();
+
+    let voxel_chunks = sim.world.resource::<VoxelWorld>().chunk_count();
+    let log_entries = sim.world.resource::<EventLog>().len();
+    println!("chunks:      {voxel_chunks}");
+    println!("log entries: {log_entries}");
+
+    let item_count = {
+        let mut q = sim.world.query::<&Item>();
+        q.iter(&sim.world).count()
+    };
+    println!("items:       {item_count}");
+
+    type CreatureRow = (bool, String, i32, String, Pos, Vec<(String, String)>);
+    let creature_rows: Vec<CreatureRow> = {
+        let mut q = sim
+            .world
+            .query::<(&Kind, &Position, &Health, Option<&Faction>, Option<&Wearing>)>();
+        q.iter(&sim.world)
+            .map(|(kind, pos, health, faction, wearing)| {
+                let equipment = wearing
+                    .map(|w| {
+                        w.iter()
+                            .map(|(slot, item)| {
+                                let name = sim
+                                    .world
+                                    .get::<ItemName>(item)
+                                    .map(|n| n.0.clone())
+                                    .unwrap_or_else(|| format!("item#{}", item.index()));
+                                (slot.label().to_string(), name)
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+                (
+                    health.is_alive(),
+                    kind.0.clone(),
+                    health.current,
+                    faction.map(|f| f.0.clone()).unwrap_or_else(|| "-".into()),
+                    pos.0,
+                    equipment,
+                )
+            })
+            .collect()
+    };
+
+    let total = creature_rows.len();
+    let alive = creature_rows.iter().filter(|r| r.0).count();
+    println!("entities:    {total}");
     println!("alive:       {alive}");
-    for entity in sim.entities.iter() {
-        let faction = entity.faction.as_deref().unwrap_or("-");
-        let status = if entity.is_alive() { "alive" } else { "dead " };
+    for (is_alive, kind, hp, faction, pos, equipment) in creature_rows {
+        let status = if is_alive { "alive" } else { "dead " };
         println!(
             "  [{}] {:10} hp={:>4} faction={:<8} pos=({:>3},{:>3},{:>3})",
-            status, entity.kind, entity.health, faction,
-            entity.position.x, entity.position.y, entity.position.z,
+            status, kind, hp, faction, pos.x, pos.y, pos.z,
         );
+        for (slot, name) in equipment {
+            println!("        {slot:>10}: {name}");
+        }
     }
 }
