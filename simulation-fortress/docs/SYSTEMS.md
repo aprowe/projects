@@ -513,6 +513,77 @@ Open questions:
   params: ...)`.
 - Composability: can a generator nest others?
 
+## 16a. Runtime event injection — partial
+
+Anything that mutates the world from the outside — a REPL, a future
+LLM front-end, or a script — flows through one typed surface:
+
+```rust
+pub enum Action {
+    Note { text: String },
+    SetVoxel { at, tile },
+    FillRegion { min, max, tile },
+    SpawnCreature { name, at, faction?, health?, body_plan? },
+    SpawnItem { name, at?, mass?, temperature?, texture?, wearable?, material?, equip_on?, give_to? },
+    SpawnHazard { at, hazard },
+    Attack { attacker, target },
+    QueueTask { actor, task },
+    Equip { wearer, item },
+    Give { holder, item },
+}
+
+pub fn apply_action(world: &mut World, action: &Action) -> Result<String, String>;
+pub fn apply_json(world: &mut World, json: &str) -> Result<Vec<String>, String>;
+```
+
+Each variant maps onto an existing engine helper (`spawn_creature`,
+`resolve_attack`, `set_voxel_logged`, etc.) — this module is a thin,
+typed surface, not new behavior. The enum derives
+`serde::Deserialize`, so the same action flows from a JSON line, a
+Rust caller, or a future scripting layer (Rhai/Rune) emitting
+structured commands.
+
+Entities are referenced by `Kind` name (`"intruder"`) or raw entity
+index. Materials by registry name (`"wood"`).
+
+Code: `crates/engine/src/inject.rs`
+
+**REPL mode** (`fortress <scenario> --repl`): the runner pauses
+between ticks. Empty line / `s` / `step` advances one tick;
+`go N` runs N ticks; raw JSON applies an Action without advancing;
+`q` exits. `Simulation` exposes `prepare()` and `step()` so the
+runner owns the tick loop.
+
+Example: drop oil at the doorway mid-run:
+
+```
+$ cargo run --bin fortress -- home_invasion --repl
+> tick 0:                          (Enter advances)
+> tick 0: go 3                     (intruder reaches the door)
+> tick 3: {"action":"SpawnHazard","at":{"x":4,"y":1,"z":0},
+          "hazard":{"type":"Slippery","slip_chance":1.0,
+          "prone_ticks":4,"label":"puddle of oil"}}
+ok: spawned puddle of oil hazard at (4, 1, 0)
+> tick 3: go 6
+[Tick 4] intruder#75 slips on the puddle of oil and crashes to
+         the floor (prone for 4 ticks).
+[Tick 5..8] (quiet — intruder is on the floor)
+[Tick 9] intruder#75 steps south to (4, 2, 0).
+```
+
+The slip is a real consequence: `Hazard::Slippery` was already in
+the engine, but it had no caller. Injection plumbing turned the
+existing primitive into a live tool without writing scenario code.
+
+Future moves:
+
+- A scripting layer above this surface (Rhai is the leading
+  candidate). `apply_action` is what scripts call.
+- Inspection actions: `InspectEntity`, `EntitiesAt`, etc., returning
+  structured data for the caller (D&D-style "what's in the drawer?").
+- Tick-scheduled injections: `--inject FILE` that runs actions at
+  declared ticks, useful for replays and tests.
+
 ## 16b. Hazards — partial
 
 Environmental hazards are entities with `Position` + `Hazard`. The

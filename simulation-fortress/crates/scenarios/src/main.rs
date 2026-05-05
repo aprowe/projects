@@ -1,10 +1,12 @@
 use std::env;
+use std::io::{self, BufRead, Write};
 use std::time::Duration;
 
 use fortress_engine::{
-    function_capacity, AsciiRenderer, BodyPartKind, CompositeRenderer, Energy, EventLog, Faction,
-    Fear, Function, Health, Hunger, Item, ItemName, Kind, LogRenderer, Mood, PartHealth, PartOf,
-    PartStatus, Position, Pos, RunOptions, Scenario, Simulation, VoxelWorld, Wearing,
+    apply_json, function_capacity, AsciiRenderer, BodyPartKind, CompositeRenderer, Energy,
+    EventLog, Faction, Fear, Function, Health, Hunger, Item, ItemName, Kind, LogRenderer, Mood,
+    PartHealth, PartOf, PartStatus, Position, Pos, Renderer, RunOptions, Scenario, Simulation,
+    VoxelWorld, Wearing,
 };
 
 mod farming;
@@ -14,12 +16,14 @@ fn main() {
     let mut args = env::args().skip(1);
     let mut scenario_name: Option<String> = None;
     let mut fast = false;
+    let mut repl = false;
     let mut max_ticks: u64 = 200;
     let mut pace_ms: u64 = 400;
 
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--fast" => fast = true,
+            "--repl" => repl = true,
             "--ticks" => {
                 max_ticks = args
                     .next()
@@ -34,14 +38,16 @@ fn main() {
             }
             other => {
                 eprintln!("unknown argument: {other}");
-                eprintln!("usage: fortress [scenario] [--fast] [--ticks N] [--pace-ms N]");
+                eprintln!(
+                    "usage: fortress [scenario] [--fast] [--repl] [--ticks N] [--pace-ms N]"
+                );
                 std::process::exit(2);
             }
         }
     }
 
     let scenario_name = scenario_name.unwrap_or_else(|| "home_invasion".into());
-    let pacing = if fast {
+    let pacing = if fast || repl {
         None
     } else {
         Some(Duration::from_millis(pace_ms))
@@ -63,7 +69,7 @@ fn main() {
                 .entity_kind("intruder", 'I')
                 .faction("family", 'f');
             let mut renderer = CompositeRenderer(log, ascii);
-            let t = sim.run_with(&mut scenario, options, &mut renderer);
+            let t = drive(&mut sim, &mut scenario, options, &mut renderer, repl);
             print_summary(&scenario, &mut sim, t);
             t
         }
@@ -75,7 +81,7 @@ fn main() {
                 .frame_every(2)
                 .faction("farm", 'F');
             let mut renderer = CompositeRenderer(log, ascii);
-            let t = sim.run_with(&mut scenario, options, &mut renderer);
+            let t = drive(&mut sim, &mut scenario, options, &mut renderer, repl);
             print_summary(&scenario, &mut sim, t);
             t
         }
@@ -87,6 +93,100 @@ fn main() {
     };
 
     println!("done at tick {final_tick}");
+}
+
+/// Drive a scenario either headlessly via `Simulation::run_with` or
+/// interactively via a stdin REPL that pauses between ticks.
+fn drive<S: Scenario, R: Renderer>(
+    sim: &mut Simulation,
+    scenario: &mut S,
+    options: RunOptions,
+    renderer: &mut R,
+    repl: bool,
+) -> u64 {
+    if !repl {
+        return sim.run_with(scenario, options, renderer);
+    }
+
+    let mut schedule = sim.prepare(scenario, options);
+    renderer.frame(&mut sim.world, 0);
+    print_repl_help();
+
+    let stdin = io::stdin();
+    let mut stdin = stdin.lock();
+    let mut input = String::new();
+    let mut ticks_taken = 0u64;
+
+    loop {
+        if ticks_taken >= options.max_ticks {
+            println!("[max ticks reached]");
+            break;
+        }
+        if scenario.is_complete(&mut sim.world) {
+            println!("[scenario complete]");
+            break;
+        }
+
+        let tick = sim.current_tick();
+        print!("> tick {tick}: ");
+        io::stdout().flush().ok();
+        input.clear();
+        match stdin.read_line(&mut input) {
+            Ok(0) => break, // EOF
+            Ok(_) => {}
+            Err(e) => {
+                eprintln!("stdin error: {e}");
+                break;
+            }
+        }
+        let line = input.trim();
+        match line {
+            "" | "step" | "s" => {
+                let next = sim.step(&mut schedule);
+                renderer.frame(&mut sim.world, next);
+                ticks_taken += 1;
+            }
+            "q" | "quit" | "exit" => break,
+            "help" | "?" => print_repl_help(),
+            cmd if cmd.starts_with("go ") => {
+                if let Ok(n) = cmd[3..].trim().parse::<u64>() {
+                    for _ in 0..n {
+                        if scenario.is_complete(&mut sim.world) {
+                            break;
+                        }
+                        if ticks_taken >= options.max_ticks {
+                            break;
+                        }
+                        let next = sim.step(&mut schedule);
+                        renderer.frame(&mut sim.world, next);
+                        ticks_taken += 1;
+                    }
+                } else {
+                    println!("usage: go N");
+                }
+            }
+            json => match apply_json(&mut sim.world, json) {
+                Ok(messages) => {
+                    for m in messages {
+                        println!("ok: {m}");
+                    }
+                }
+                Err(e) => println!("error: {e}"),
+            },
+        }
+    }
+
+    sim.current_tick()
+}
+
+fn print_repl_help() {
+    println!("commands:");
+    println!("  <enter>, step, s    advance one tick");
+    println!("  go N                advance N ticks");
+    println!("  <json>              inject one Action (or array) and stay on this tick");
+    println!("  q, quit, exit       end the simulation");
+    println!("  help, ?             show this help");
+    println!();
 }
 
 fn print_summary<S: Scenario>(scenario: &S, sim: &mut Simulation, tick: u64) {

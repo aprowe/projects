@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use bevy_ecs::prelude::World;
+use bevy_ecs::prelude::{Schedule, World};
 
 use crate::log::EventLog;
 use crate::render::{NullRenderer, Renderer};
@@ -69,6 +69,23 @@ impl Simulation {
         self.world.resource::<Clock>().tick
     }
 
+    /// Insert engine resources keyed by `options`, run the scenario's
+    /// `setup`, and return its `Schedule`. After this returns the
+    /// caller can drive the sim manually with [`Self::step`] or hand
+    /// off to [`Self::run_with`].
+    pub fn prepare<S: Scenario>(&mut self, scenario: &mut S, options: RunOptions) -> Schedule {
+        self.world.insert_resource(Rng::from_seed(options.rng_seed));
+        scenario.setup(&mut self.world);
+        scenario.build_schedule()
+    }
+
+    /// Advance one tick: bump the clock, run every system in `schedule`.
+    pub fn step(&mut self, schedule: &mut Schedule) -> Tick {
+        self.world.resource_mut::<Clock>().advance();
+        schedule.run(&mut self.world);
+        self.current_tick()
+    }
+
     /// Run the scenario headlessly with the given options.
     pub fn run<S: Scenario>(&mut self, scenario: &mut S, options: RunOptions) -> Tick {
         self.run_with(scenario, options, &mut NullRenderer)
@@ -87,18 +104,14 @@ impl Simulation {
         S: Scenario,
         R: Renderer,
     {
-        self.world.insert_resource(Rng::from_seed(options.rng_seed));
-        scenario.setup(&mut self.world);
-        let mut schedule = scenario.build_schedule();
+        let mut schedule = self.prepare(scenario, options);
         renderer.frame(&mut self.world, 0);
         if let Some(pace) = options.pacing {
             std::thread::sleep(pace);
         }
 
         for _ in 0..options.max_ticks {
-            self.world.resource_mut::<Clock>().advance();
-            schedule.run(&mut self.world);
-            let tick = self.current_tick();
+            let tick = self.step(&mut schedule);
             renderer.frame(&mut self.world, tick);
             if scenario.is_complete(&mut self.world) {
                 break;

@@ -6,10 +6,11 @@
 use fortress_engine::actions::{fill_region_logged, note, spawn_creature};
 use fortress_engine::prelude::*;
 use fortress_engine::{
-    derive_mood, equip_item, execute_tasks, retaliation_system, spawn_humanoid_body, tick_needs,
-    BodySlot, Clock, ElectricalConductivity, Event, EventLog, Fear, Goal, Health, Item, ItemName,
-    Kind, Mass, Material, Mood, Position, Pos, RetaliateOnAttack, Scenario, Task, TaskQueue,
-    Temperature, Texture, ThermalConductivity, Voxel, VoxelWorld, Wearable,
+    check_hazards, derive_mood, equip_item, execute_tasks, retaliation_system,
+    spawn_humanoid_body, tick_needs, BodySlot, Clock, ElectricalConductivity, Event, EventLog,
+    Fear, Goal, Health, Item, ItemName, Kind, Mass, Material, Mood, Position, Pos,
+    RetaliateOnAttack, Scenario, Task, TaskQueue, Temperature, Texture, ThermalConductivity,
+    Voxel, VoxelWorld, Wearable,
 };
 
 const FAMILY: &str = "family";
@@ -140,6 +141,7 @@ impl Scenario for HomeInvasion {
                 intruder_planner,
                 doorway_announcer,
                 execute_tasks,
+                check_hazards,
                 retaliation_system,
                 frighten_attacked,
             )

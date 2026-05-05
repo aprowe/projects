@@ -12,6 +12,7 @@ pub mod anatomy;
 pub mod combat;
 pub mod components;
 pub mod hazards;
+pub mod inject;
 pub mod items;
 pub mod log;
 pub mod needs;
@@ -33,6 +34,7 @@ pub use anatomy::{
 };
 pub use combat::{resolve_attack, AttackResult};
 pub use hazards::{check_hazards, Hazard};
+pub use inject::{apply_action, apply_json, Action};
 pub use components::{ExtraData, Faction, Health, Kind, Position};
 pub use items::{
     drop_item, equip_item, give_item, held_weapons_summary, item_world_position, unequip_item,
