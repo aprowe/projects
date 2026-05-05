@@ -48,16 +48,57 @@ impl Material {
     }
 }
 
+/// What the voxel cell physically is. Inspired by Dwarf Fortress: a tile
+/// can be empty air, a zero-height floor (walkable surface, no solid in
+/// the cell), a full solid wall, or a ramp connecting two Z levels.
+#[repr(u8)]
+#[derive(Copy, Clone, Default, Debug, Eq, PartialEq, Hash)]
+pub enum TileKind {
+    #[default]
+    Empty = 0,
+    Floor = 1,
+    Wall = 2,
+    RampUp = 3,
+}
+
 #[derive(Copy, Clone, Default, Debug, Eq, PartialEq)]
 pub struct Voxel {
-    pub material: MaterialId,
-    /// Damage accumulated on this voxel: 0 is pristine, 255 is destroyed.
+    pub kind: TileKind,
     pub damage: u8,
+    pub material: MaterialId,
 }
 
 impl Voxel {
-    pub const fn of(material: MaterialId) -> Self {
-        Self { material, damage: 0 }
+    pub const fn empty() -> Self {
+        Self {
+            kind: TileKind::Empty,
+            damage: 0,
+            material: AIR,
+        }
+    }
+
+    pub const fn floor(material: MaterialId) -> Self {
+        Self {
+            kind: TileKind::Floor,
+            damage: 0,
+            material,
+        }
+    }
+
+    pub const fn wall(material: MaterialId) -> Self {
+        Self {
+            kind: TileKind::Wall,
+            damage: 0,
+            material,
+        }
+    }
+
+    pub const fn ramp(material: MaterialId) -> Self {
+        Self {
+            kind: TileKind::RampUp,
+            damage: 0,
+            material,
+        }
     }
 }
 
@@ -135,10 +176,25 @@ impl World {
         }
     }
 
+    /// True if the cell is a full solid block that nothing can pass through.
     pub fn is_solid(&self, pos: Pos) -> bool {
-        self.material(self.voxel(pos).material)
-            .map(|m| m.solid)
-            .unwrap_or(false)
+        self.voxel(pos).kind == TileKind::Wall
+    }
+
+    /// True if a creature can stand in this tile.
+    ///
+    /// Floors and ramps are walkable on their own. Empty tiles are
+    /// walkable only if supported from below by a Wall or RampUp (i.e.
+    /// you stand on the top surface of the block beneath).
+    pub fn is_walkable(&self, pos: Pos) -> bool {
+        match self.voxel(pos).kind {
+            TileKind::Wall => false,
+            TileKind::Floor | TileKind::RampUp => true,
+            TileKind::Empty => {
+                let below = self.voxel(Pos::new(pos.x, pos.y, pos.z - 1));
+                matches!(below.kind, TileKind::Wall | TileKind::RampUp)
+            }
+        }
     }
 
     pub fn chunk_count(&self) -> usize {
@@ -167,15 +223,19 @@ fn chunk_index(pos: Pos) -> (ChunkCoord, usize) {
 mod tests {
     use super::*;
 
-    #[test]
-    fn voxels_round_trip_across_chunk_boundaries() {
-        let mut world = World::new();
-        let stone = world.register_material(Material {
+    fn stone(world: &mut World) -> MaterialId {
+        world.register_material(Material {
             name: "stone".into(),
             solid: true,
             density: 2.5,
             flammable: false,
-        });
+        })
+    }
+
+    #[test]
+    fn voxels_round_trip_across_chunk_boundaries() {
+        let mut world = World::new();
+        let stone = stone(&mut world);
         let positions = [
             Pos::new(0, 0, 0),
             Pos::new(15, 15, 15),
@@ -184,28 +244,43 @@ mod tests {
             Pos::new(-17, 5, 32),
         ];
         for p in positions {
-            world.set_voxel(p, Voxel::of(stone));
+            world.set_voxel(p, Voxel::wall(stone));
         }
         for p in positions {
             assert_eq!(world.voxel(p).material, stone, "round trip failed at {:?}", p);
+            assert_eq!(world.voxel(p).kind, TileKind::Wall);
         }
     }
 
     #[test]
-    fn fill_marks_a_solid_region() {
+    fn floor_is_walkable_but_not_solid() {
         let mut world = World::new();
-        let wood = world.register_material(Material {
-            name: "wood".into(),
-            solid: true,
-            density: 0.7,
-            flammable: true,
-        });
-        world.fill(Pos::new(0, 0, 0), Pos::new(2, 2, 0), Voxel::of(wood));
-        for x in 0..=2 {
-            for y in 0..=2 {
-                assert!(world.is_solid(Pos::new(x, y, 0)));
-            }
-        }
-        assert!(!world.is_solid(Pos::new(3, 0, 0)));
+        let stone = stone(&mut world);
+        let p = Pos::new(0, 0, 0);
+        world.set_voxel(p, Voxel::floor(stone));
+        assert!(world.is_walkable(p));
+        assert!(!world.is_solid(p));
+    }
+
+    #[test]
+    fn empty_tile_walkable_only_with_support() {
+        let mut world = World::new();
+        let stone = stone(&mut world);
+        let p = Pos::new(0, 0, 0);
+        // No support below — empty floats.
+        assert!(!world.is_walkable(p));
+        // Wall directly below provides support — top of block is walkable.
+        world.set_voxel(Pos::new(0, 0, -1), Voxel::wall(stone));
+        assert!(world.is_walkable(p));
+    }
+
+    #[test]
+    fn wall_is_solid_and_unwalkable() {
+        let mut world = World::new();
+        let stone = stone(&mut world);
+        let p = Pos::new(0, 0, 0);
+        world.set_voxel(p, Voxel::wall(stone));
+        assert!(world.is_solid(p));
+        assert!(!world.is_walkable(p));
     }
 }

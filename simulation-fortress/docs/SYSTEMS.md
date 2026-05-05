@@ -33,9 +33,20 @@ need to answer. Edit freely.
 ## 1. Tile / voxel system — partial
 
 3D grid of voxel cells, chunked into 16×16×16 blocks for cache
-locality. Each voxel currently stores a `MaterialId` and a `damage`
-byte. `World::set_voxel` / `World::voxel` / `World::fill` are the only
-mutation primitives.
+locality. Each voxel stores a `TileKind` (Empty / Floor / Wall /
+RampUp), a `MaterialId`, and a `damage` byte. The kind decides the
+geometry and walkability of the cell:
+
+- **Wall** — full solid block; impassable, opaque.
+- **Floor** — zero-height walkable surface (DF-style); occupiable but
+  not solid.
+- **Empty** — open air; walkable only when the cell directly below is
+  a Wall or RampUp (you stand on the top surface of the block beneath).
+- **RampUp** — sloped, walkable, will eventually let pathfinding
+  traverse Z levels.
+
+`World::is_walkable` and `World::is_solid` express these rules.
+`World::set_voxel`, `voxel`, and `fill` are the mutation primitives.
 
 Code: `crates/engine/src/world.rs`
 
@@ -46,8 +57,9 @@ Open questions:
 - Sparse storage: should empty (all-air) chunks be elided entirely?
 - Lighting / line-of-sight: per-voxel light value, or computed on
   demand?
-- Multi-voxel structures (doors, windows, beds) — voxel attribute,
+- Multi-voxel structures (doors, windows, beds) — extend `TileKind`,
   separate "feature" layer, or entity?
+- Z-level traversal: ramp pathing, stairs, ladders, jumps.
 
 ## 2. Materials — partial
 
@@ -229,18 +241,30 @@ Open questions:
 - Morale and retreat.
 - Non-lethal options (subdue, intimidate, surrender).
 
-## 14. Pathfinding & navigation — planned
+## 14. Pathfinding & navigation — partial
 
-Move entities through the voxel world avoiding solids. A* over the
-voxel grid is the obvious starting point, with a chunk-level coarse
-graph for long-distance plans.
+`find_path(world, start, goal, max_iter) -> Option<Vec<Pos>>` runs A*
+over the voxel grid, 8-connected on a single Z-level. Diagonal
+corner-cutting is forbidden: a diagonal step requires both flanking
+cardinal cells to also be walkable, matching DF's "you can't squeeze
+between two walls" rule. Step costs are 10 (cardinal) and 14
+(diagonal); the heuristic is the corresponding octile distance.
 
-Open questions:
+Code: `crates/engine/src/pathfind.rs`
 
-- How do we handle dynamic obstacles (other entities, doors)?
-- 3D pathing across z-levels — stairs, ladders, jumps as graph edges?
-- Re-plan cadence vs. cost.
-- Group movement (a squad of soldiers).
+Used by the home invasion scenario today: every tick the intruder
+re-plans to the nearest living family member and takes path[1]. When
+the path's first step lands on the target's tile, the move becomes an
+attack instead.
+
+Still open:
+
+- Z-level traversal via ramps / stairs (the search is currently
+  single-Z).
+- Treating other entities as dynamic obstacles, with replan triggers.
+- Coarse chunk-level graph for long-distance plans on large maps.
+- Path caching / partial replans instead of full A* per tick.
+- Group movement (a squad of soldiers moving together).
 
 ## 15. Time, weather, seasons — planned
 

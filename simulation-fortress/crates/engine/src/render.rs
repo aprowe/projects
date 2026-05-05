@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use crate::entity::EntityStore;
 use crate::log::{narrate, EventLog};
 use crate::time::Tick;
-use crate::world::{MaterialId, Pos, World, AIR};
+use crate::world::{MaterialId, Pos, TileKind, World};
 
 /// Read-only window into the simulation, passed to renderers.
 pub struct SimulationView<'a> {
@@ -47,6 +47,8 @@ pub struct AsciiRenderer {
     pub z: i32,
     pub frame_every: u64,
     pub air_glyph: char,
+    pub floor_glyph: char,
+    pub ramp_glyph: char,
     pub default_solid_glyph: char,
     pub default_entity_glyph: char,
     pub material_glyphs: HashMap<MaterialId, char>,
@@ -61,13 +63,25 @@ impl AsciiRenderer {
             max,
             z: min.z,
             frame_every: 1,
-            air_glyph: '.',
+            air_glyph: ' ',
+            floor_glyph: '.',
+            ramp_glyph: '<',
             default_solid_glyph: '#',
             default_entity_glyph: '?',
             material_glyphs: HashMap::new(),
             entity_kind_glyphs: HashMap::new(),
             faction_glyphs: HashMap::new(),
         }
+    }
+
+    pub fn floor_glyph(mut self, glyph: char) -> Self {
+        self.floor_glyph = glyph;
+        self
+    }
+
+    pub fn ramp_glyph(mut self, glyph: char) -> Self {
+        self.ramp_glyph = glyph;
+        self
     }
 
     pub fn at_z(mut self, z: i32) -> Self {
@@ -97,16 +111,15 @@ impl AsciiRenderer {
 
     fn glyph_for_voxel(&self, world: &World, pos: Pos) -> char {
         let voxel = world.voxel(pos);
-        if voxel.material == AIR {
-            return self.air_glyph;
-        }
-        if let Some(&g) = self.material_glyphs.get(&voxel.material) {
-            return g;
-        }
-        if world.is_solid(pos) {
-            self.default_solid_glyph
-        } else {
-            self.air_glyph
+        match voxel.kind {
+            TileKind::Empty => self.air_glyph,
+            TileKind::Floor => self.floor_glyph,
+            TileKind::RampUp => self.ramp_glyph,
+            TileKind::Wall => self
+                .material_glyphs
+                .get(&voxel.material)
+                .copied()
+                .unwrap_or(self.default_solid_glyph),
         }
     }
 

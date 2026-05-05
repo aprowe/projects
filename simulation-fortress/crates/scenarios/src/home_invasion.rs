@@ -1,15 +1,21 @@
 //! A small example scenario: a wood-walled house with a family inside and
-//! an intruder at the door. Demonstrates building voxel structures,
-//! spawning faction-tagged entities, and driving simple per-tick behavior
-//! with rich event-log narration.
+//! an intruder at the door. Demonstrates building voxel structures with
+//! floors and walls, spawning faction-tagged entities, and driving simple
+//! per-tick behavior over A* pathfinding with rich event-log narration.
 
 use fortress_engine::{
-    Entity, EntityId, EntityStore, Material, Pos, Scenario, SetupContext, TickContext, Voxel,
-    World,
+    find_path, Entity, EntityId, EntityStore, Material, Pos, Scenario, SetupContext, TickContext,
+    Voxel, World,
 };
 
 const FAMILY: &str = "family";
 const INTRUDER: &str = "intruder";
+
+const HOUSE_X: std::ops::Range<i32> = 0..8;
+const HOUSE_Y: std::ops::Range<i32> = 0..8;
+const DOOR: Pos = Pos::new(4, 0, 0);
+const GROUND_MIN: Pos = Pos::new(-2, -5, 0);
+const GROUND_MAX: Pos = Pos::new(10, 10, 0);
 
 #[derive(Default)]
 pub struct HomeInvasion {
@@ -28,25 +34,40 @@ impl Scenario for HomeInvasion {
             density: 0.7,
             flammable: true,
         });
-        ctx.world.register_material(Material {
-            name: "stone".into(),
-            solid: true,
-            density: 2.5,
-            flammable: false,
+        let grass = ctx.world.register_material(Material {
+            name: "grass".into(),
+            solid: false,
+            density: 0.1,
+            flammable: true,
         });
-        ctx.note("A small wooden house stands alone at the edge of the woods.");
+        ctx.note("A small wooden cabin stands alone at the edge of the woods.");
 
-        let wall = Voxel::of(wood);
-        for x in 0..8 {
-            for y in 0..8 {
-                let on_edge = x == 0 || x == 7 || y == 0 || y == 7;
-                let is_door = x == 4 && y == 0;
-                if on_edge && !is_door {
-                    ctx.world.set_voxel(Pos::new(x, y, 0), wall);
+        ctx.fill(GROUND_MIN, GROUND_MAX, Voxel::floor(grass));
+        ctx.note("Grass spreads in every direction, soft underfoot.");
+
+        ctx.fill(
+            Pos::new(HOUSE_X.start, HOUSE_Y.start, 0),
+            Pos::new(HOUSE_X.end - 1, HOUSE_Y.end - 1, 0),
+            Voxel::floor(wood),
+        );
+        ctx.note("Inside the cabin, planks of wood form the floor.");
+
+        let wall = Voxel::wall(wood);
+        for x in HOUSE_X {
+            for y in HOUSE_Y {
+                let on_edge = x == HOUSE_X.start
+                    || x == HOUSE_X.end - 1
+                    || y == HOUSE_Y.start
+                    || y == HOUSE_Y.end - 1;
+                let pos = Pos::new(x, y, 0);
+                if on_edge && pos != DOOR {
+                    ctx.world.set_voxel(pos, wall);
                 }
             }
         }
-        ctx.note("The walls go up: wooden planks form an 8x8 single-room cabin with a door on the north side.");
+        ctx.note(
+            "The walls go up: wooden planks form an 8x8 single-room cabin with a door on the north side.",
+        );
 
         for (i, (x, y)) in [(2, 4), (5, 4), (3, 6)].into_iter().enumerate() {
             let id = ctx.spawn(format!("resident_{i}"), Pos::new(x, y, 0));
@@ -83,7 +104,19 @@ impl Scenario for HomeInvasion {
             return;
         };
 
-        let next = intruder.position.step_toward(target.position);
+        let path = find_path(ctx.world, intruder.position, target.position, 4096);
+        let Some(path) = path else {
+            ctx.note(format!(
+                "The intruder peers about but can't find a path to {}#{}.",
+                target.kind, target.id.0
+            ));
+            return;
+        };
+        if path.len() < 2 {
+            return;
+        }
+
+        let next = path[1];
         if next == target.position {
             ctx.note(format!(
                 "The intruder closes the gap on {}#{} and swings the crowbar.",
@@ -96,8 +129,7 @@ impl Scenario for HomeInvasion {
             ));
             ctx.damage(intruder.id, Some(target.id), 5);
         } else {
-            let inside_house = next.x >= 1 && next.x <= 6 && next.y >= 1 && next.y <= 6;
-            if inside_house && !inside_position(intruder.position) {
+            if !inside_house(intruder.position) && inside_house(next) {
                 ctx.note("The intruder ducks through the doorway and into the cabin.");
             }
             ctx.move_entity(intruder.id, next);
@@ -122,6 +154,10 @@ fn nearest_living(entities: &EntityStore, from: &Entity, faction: &str) -> Optio
         .cloned()
 }
 
-fn inside_position(pos: Pos) -> bool {
-    pos.x >= 1 && pos.x <= 6 && pos.y >= 1 && pos.y <= 6 && pos.z == 0
+fn inside_house(pos: Pos) -> bool {
+    pos.z == 0
+        && pos.x > HOUSE_X.start
+        && pos.x < HOUSE_X.end - 1
+        && pos.y > HOUSE_Y.start
+        && pos.y < HOUSE_Y.end - 1
 }

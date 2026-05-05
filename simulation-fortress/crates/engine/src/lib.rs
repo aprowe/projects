@@ -7,6 +7,7 @@
 
 pub mod entity;
 pub mod log;
+pub mod pathfind;
 pub mod render;
 pub mod scenario;
 pub mod simulation;
@@ -15,8 +16,9 @@ pub mod world;
 
 pub use entity::{Entity, EntityId, EntityStore};
 pub use log::{narrate, Event, EventLog};
+pub use pathfind::find_path;
 pub use render::{AsciiRenderer, CompositeRenderer, LogRenderer, NullRenderer, Renderer, SimulationView};
 pub use scenario::{Scenario, SetupContext, TickContext};
 pub use simulation::{RunOptions, Simulation};
 pub use time::{Clock, Tick};
-pub use world::{Chunk, Material, MaterialId, Pos, Voxel, World, AIR, CHUNK_SIZE};
+pub use world::{Chunk, Material, MaterialId, Pos, TileKind, Voxel, World, AIR, CHUNK_SIZE};
