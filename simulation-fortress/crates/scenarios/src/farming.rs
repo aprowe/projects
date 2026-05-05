@@ -8,8 +8,9 @@
 use fortress_engine::actions::{fill_region_logged, note, spawn_creature};
 use fortress_engine::prelude::*;
 use fortress_engine::{
-    execute_tasks, spawn_humanoid_body, Clock, Event, EventLog, Goal, Kind, Material, Position,
-    Pos, Scenario, Task, TaskQueue, Voxel, VoxelWorld,
+    derive_mood, execute_tasks, spawn_humanoid_body, tick_needs, Clock, Energy, Event, EventLog,
+    Goal, Hunger, Kind, Material, Mood, Position, Pos, Scenario, Task, TaskQueue, Voxel,
+    VoxelWorld,
 };
 
 const FARMER: &str = "farm";
@@ -30,6 +31,10 @@ pub struct Farmer;
 
 #[derive(Component)]
 pub struct Crop;
+
+/// Marker for the cabin/larder where farmers go to eat.
+#[derive(Component)]
+pub struct Kitchen;
 
 #[derive(Component, Copy, Clone, Debug)]
 pub struct GrowthStage(pub u8);
@@ -76,7 +81,9 @@ impl Scenario for Farming {
             }
         }
 
-        // Two farmers near the edge of the field.
+        // Two farmers near the edge of the field. Each starts with a
+        // little hunger already on the bone so they break for meals
+        // partway through the day.
         for (i, (x, y)) in [(0, 0), (6, 6)].into_iter().enumerate() {
             let entity = spawn_creature(
                 world,
@@ -89,16 +96,39 @@ impl Scenario for Farming {
                 .entity_mut(entity)
                 .insert(Farmer)
                 .insert(TaskQueue::default())
-                .insert(Goal::default());
+                .insert(Goal::default())
+                .insert(Hunger {
+                    current: 0.2,
+                    rate: 0.015,
+                })
+                .insert(Energy::new(0.005))
+                .insert(Mood::default());
             spawn_humanoid_body(world, entity);
         }
+
+        // A larder by the front gate. Eating here resets hunger to 0.
+        let kitchen_pos = Pos::new(0, 6, 0);
+        world.spawn((
+            Kitchen,
+            Kind("larder".into()),
+            Position(kitchen_pos),
+        ));
+        note(world, "A larder sits by the gate, stocked for the day's work.");
         note(world, "The farmers stretch and look out across the field.");
     }
 
     fn build_schedule(&mut self) -> Schedule {
         let mut schedule = Schedule::default();
         schedule.add_systems(
-            (farmer_planner, execute_tasks, advance_used_crops).chain(),
+            (
+                tick_needs,
+                derive_mood,
+                farmer_planner,
+                execute_tasks,
+                advance_used_crops,
+                consume_at_kitchen,
+            )
+                .chain(),
         );
         schedule
     }
@@ -109,11 +139,16 @@ impl Scenario for Farming {
     }
 }
 
-/// Each tick, give every idle farmer a goal of tending the closest
-/// crop that still needs work (anything that isn't harvested). Skips
-/// crops another farmer is already heading toward.
+/// Each tick, replan every farmer:
+/// - if hungry, head for the kitchen and eat;
+/// - else tend the closest unfinished crop;
+/// - else idle.
 fn farmer_planner(world: &mut World) {
-    // Snapshot all unfinished crops.
+    let kitchen: Option<(Entity, Pos)> = {
+        let mut q = world.query_filtered::<(Entity, &Position), With<Kitchen>>();
+        q.iter(world).map(|(e, p)| (e, p.0)).next()
+    };
+
     let crops: Vec<(Entity, Pos, u8)> = {
         let mut q = world.query::<(Entity, &Position, &GrowthStage)>();
         q.iter(world)
@@ -122,28 +157,57 @@ fn farmer_planner(world: &mut World) {
             .collect()
     };
 
-    // Snapshot every farmer that needs a new plan.
-    let farmers: Vec<(Entity, Pos, Goal, bool)> = {
+    let farmers: Vec<(Entity, Pos, Goal, bool, f32)> = {
         let mut q = world
-            .query_filtered::<(Entity, &Position, &Goal, &TaskQueue), With<Farmer>>();
+            .query_filtered::<(Entity, &Position, &Goal, &TaskQueue, &Hunger), With<Farmer>>();
         q.iter(world)
-            .map(|(e, p, g, q)| (e, p.0, g.clone(), q.is_empty()))
+            .map(|(e, p, g, q, h)| (e, p.0, g.clone(), q.is_empty(), h.current))
             .collect()
     };
 
-    // Track which crops are already targeted by a farmer this tick so
-    // two farmers don't head for the same plant.
+    // Two farmers shouldn't pick the same crop for tending.
     let mut claimed: std::collections::HashSet<Entity> = farmers
         .iter()
-        .filter_map(|(_, _, g, _)| match g {
+        .filter_map(|(_, _, g, _, _)| match g {
             Goal::Tend(e) => Some(*e),
             _ => None,
         })
         .collect();
 
-    for (farmer, pos, goal, queue_empty) in farmers {
-        // Keep the existing plan if the goal's target still isn't
-        // harvested.
+    for (farmer, pos, goal, queue_empty, hunger) in farmers {
+        let hungry = hunger >= 0.6;
+
+        // If already heading to eat, leave them be until they arrive
+        // and finish.
+        if matches!(goal, Goal::Eat(_)) && !queue_empty {
+            continue;
+        }
+
+        // Hungry farmers drop everything for a meal.
+        if hungry {
+            if let Some((kitchen_entity, kitchen_pos)) = kitchen {
+                if !matches!(goal, Goal::Eat(e) if e == kitchen_entity) {
+                    push_note(
+                        world,
+                        format!(
+                            "{} sets down their work and heads for the larder.",
+                            label_kind(world, farmer)
+                        ),
+                    );
+                }
+                if let Some(mut q) = world.get_mut::<TaskQueue>(farmer) {
+                    q.clear();
+                    q.push(Task::MoveTo(kitchen_pos));
+                    q.push(Task::UseEntity(kitchen_entity));
+                }
+                if let Some(mut g) = world.get_mut::<Goal>(farmer) {
+                    *g = Goal::Eat(kitchen_entity);
+                }
+                continue;
+            }
+        }
+
+        // Otherwise, keep tending the current crop if still unfinished.
         if let Goal::Tend(target) = goal {
             let still_unfinished = crops.iter().any(|(e, _, _)| *e == target);
             if still_unfinished && !queue_empty {
@@ -151,6 +215,7 @@ fn farmer_planner(world: &mut World) {
             }
         }
 
+        // Pick a fresh crop.
         let pick = crops
             .iter()
             .filter(|(e, _, _)| !claimed.contains(e))
@@ -182,6 +247,36 @@ fn farmer_planner(world: &mut World) {
                 ),
             );
         }
+    }
+}
+
+/// React to `EntityUsed` events targeting a `Kitchen` entity by
+/// resetting the user's hunger.
+fn consume_at_kitchen(world: &mut World) {
+    let tick = world.resource::<Clock>().tick;
+    let used: Vec<(Entity, Entity)> = world
+        .resource::<EventLog>()
+        .events_at(tick)
+        .filter_map(|e| match e {
+            Event::EntityUsed { user, target } => Some((*user, *target)),
+            _ => None,
+        })
+        .collect();
+
+    for (user, target) in used {
+        if world.get::<Kitchen>(target).is_none() {
+            continue;
+        }
+        if let Some(mut h) = world.get_mut::<Hunger>(user) {
+            h.feed(1.0);
+        }
+        push_note(
+            world,
+            format!(
+                "{} eats a hurried meal at the larder.",
+                label_kind(world, user)
+            ),
+        );
     }
 }
 

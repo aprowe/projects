@@ -338,19 +338,59 @@ Still open:
   construct a wall) want explicit progress tracking instead of
   ad-hoc `Wait`.
 
-## 11. Needs, drives & moods — planned
+## 11. Needs, drives & moods — partial
 
-Hunger, thirst, sleep, social contact, safety, purpose. Unmet needs
-push entities toward actions that satisfy them. Mood is the running
-average of need satisfaction plus recent events.
+Each need is its own component on a creature, so scenarios opt in to
+whichever ones make sense (a soldier doesn't need sleep in a
+30-minute skirmish; a zombie has no hunger of the human kind).
 
-Open questions:
+Implemented today:
 
-- How many needs? Maslow-shaped, or DF-style "thoughts and
-  preferences" (every entity has a list of things they like and
-  dislike, modulating mood)?
-- How do we keep this from dominating CPU when there are hundreds of
-  agents?
+- `Hunger { current, rate }` — drifts up toward 1.0; `feed(amount)`
+  pushes it back. Helpers: `is_hungry()` (≥0.6), `is_starving()`
+  (≥0.95).
+- `Energy { current, drain_rate }` — drifts down toward 0.0;
+  `rest(amount)` refills. Helpers: `is_tired()`, `is_exhausted()`.
+- `Fear { current, decay_rate }` — decays toward 0.0;
+  `frighten(amount)` spikes it. Helpers: `is_afraid()`,
+  `is_terrified()`.
+- `Mood` — derived value in `[-1, 1]`. The default `derive_mood`
+  system mixes hunger, fear, and energy into a score; scenarios can
+  write their own formula.
+
+Engine systems (run them in your scenario's schedule):
+
+- `tick_needs` — drifts every need each tick.
+- `derive_mood` — recomputes Mood from the others.
+
+Code: `crates/engine/src/needs.rs`
+
+**Demonstrated in two scenarios:**
+
+- *Farming* — farmers carry `Hunger`, `Energy`, `Mood`. Each tick
+  hunger creeps up; when it crosses 0.6 the planner switches goal
+  to `Goal::Eat(kitchen)` and queues `[MoveTo(larder), UseEntity
+  (larder)]`. The scenario's `consume_at_kitchen` system listens for
+  `EntityUsed` on the larder and resets hunger. Two lunch breaks
+  fit naturally into the working day.
+- *Home invasion* — residents carry `Fear` (and `Mood`). A
+  scenario-local `frighten_attacked` system reads `BodyPartWounded`
+  events and spikes the victim's fear, with a one-shot "wide-eyed
+  with terror" note when the threshold is crossed. Final summary
+  shows residents ending with high fear and "miserable" mood.
+
+Still open:
+
+- More needs: thirst, social contact, safety, purpose.
+- Need-driven planning utility scoring (today scenarios test
+  `is_hungry()` directly; a generic utility-AI selector would let
+  multiple needs compete).
+- Performance with hundreds of agents — currently every need ticks
+  every entity every tick. Batched / cached approaches when scale
+  matters.
+- Mood "stickiness" — current value is recomputed fresh each tick;
+  drifting toward the derived value would make individual events
+  have lasting effect.
 
 ## 12. Relationships & factions — partial
 

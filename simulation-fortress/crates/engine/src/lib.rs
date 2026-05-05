@@ -13,6 +13,7 @@ pub mod combat;
 pub mod components;
 pub mod items;
 pub mod log;
+pub mod needs;
 pub mod pathfind;
 pub mod render;
 pub mod rng;
@@ -35,6 +36,7 @@ pub use items::{
     Texture, ThermalConductivity, Wearable, Wearing,
 };
 pub use log::{narrate, Event, EventLog};
+pub use needs::{derive_mood, tick_needs, Energy, Fear, Hunger, Mood};
 pub use pathfind::find_path;
 pub use render::{
     AsciiRenderer, CompositeRenderer, LogRenderer, NullRenderer, Renderer,

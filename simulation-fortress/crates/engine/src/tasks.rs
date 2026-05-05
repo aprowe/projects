@@ -40,6 +40,7 @@ pub enum Goal {
     GoTo(Pos),
     Kill(Entity),
     Tend(Entity),
+    Eat(Entity),
 }
 
 impl Goal {
@@ -49,6 +50,7 @@ impl Goal {
             Goal::GoTo(p) => format!("go to ({}, {}, {})", p.x, p.y, p.z),
             Goal::Kill(e) => format!("kill #{}", e.index()),
             Goal::Tend(e) => format!("tend #{}", e.index()),
+            Goal::Eat(e) => format!("eat #{}", e.index()),
         }
     }
 }

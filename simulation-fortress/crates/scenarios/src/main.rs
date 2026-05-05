@@ -2,9 +2,9 @@ use std::env;
 use std::time::Duration;
 
 use fortress_engine::{
-    function_capacity, AsciiRenderer, BodyPartKind, CompositeRenderer, EventLog, Faction,
-    Function, Health, Item, ItemName, Kind, LogRenderer, PartHealth, PartOf, PartStatus,
-    Position, Pos, RunOptions, Scenario, Simulation, VoxelWorld, Wearing,
+    function_capacity, AsciiRenderer, BodyPartKind, CompositeRenderer, Energy, EventLog, Faction,
+    Fear, Function, Health, Hunger, Item, ItemName, Kind, LogRenderer, Mood, PartHealth, PartOf,
+    PartStatus, Position, Pos, RunOptions, Scenario, Simulation, VoxelWorld, Wearing,
 };
 
 mod farming;
@@ -177,10 +177,31 @@ fn print_summary<S: Scenario>(scenario: &S, sim: &mut Simulation, tick: u64) {
             }
             println!();
         }
+        let needs = creature_needs_summary(sim, entity);
+        if !needs.is_empty() {
+            println!("           needs:  {needs}");
+        }
         for (slot, name) in equipment {
             println!("           {slot:>9}: {name}");
         }
     }
+}
+
+fn creature_needs_summary(sim: &Simulation, entity: bevy_ecs::entity::Entity) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(h) = sim.world.get::<Hunger>(entity) {
+        parts.push(format!("hunger {:.2}", h.current));
+    }
+    if let Some(e) = sim.world.get::<Energy>(entity) {
+        parts.push(format!("energy {:.2}", e.current));
+    }
+    if let Some(f) = sim.world.get::<Fear>(entity) {
+        parts.push(format!("fear {:.2}", f.current));
+    }
+    if let Some(m) = sim.world.get::<Mood>(entity) {
+        parts.push(format!("mood {:.2} ({})", m.current, m.label()));
+    }
+    parts.join("  ")
 }
 
 fn collect_damaged_parts(
