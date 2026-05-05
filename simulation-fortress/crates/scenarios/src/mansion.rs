@@ -35,7 +35,8 @@ use fortress_engine::anatomy::{apply_body_plan, quadruped_body_plan};
 use fortress_engine::{
     decay_coatings, derive_mood, door_voxel_sync, emit_combat_sounds, emit_movement_sounds,
     ensure_material, execute_tasks, fear_from_combat, find_path, footing_check,
-    furniture_emit_system, manipulation_check, retaliation_system, spawn_furniture_template, tick_carrying,
+    furniture_emit_system, manipulation_check, retaliation_system, spawn_furniture_template,
+    tick_carrying, tick_fire, tick_schedules, tick_status_effects,
     spawn_humanoid_body, spawn_item_template, strength_check, tick_needs, update_hearing,
     update_sight, update_smell, CheckOutcome, Clock, Door, DoorState, Event, EventLog, Fear,
     Goal, Health, Hearing, Kind, Locomotion, Mood, Perceived, Position, Pos,
@@ -711,6 +712,9 @@ impl Scenario for MansionInvasion {
                 invader_planner,
                 execute_tasks,
                 tick_carrying,
+                tick_fire,
+                tick_status_effects,
+                tick_schedules,
                 handle_door_use,
             )
                 .chain(),

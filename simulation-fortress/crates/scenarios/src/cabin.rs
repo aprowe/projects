@@ -22,6 +22,7 @@ use fortress_engine::{
     decay_coatings, derive_mood, door_voxel_sync, emit_combat_sounds, emit_movement_sounds,
     ensure_material, execute_tasks, fear_from_combat, find_path, footing_check,
     furniture_emit_system, retaliation_system, spawn_furniture_template, spawn_humanoid_body,
+    tick_fire,
     spawn_item_template, tick_needs, tick_status_effects, update_hearing, update_sight,
     update_smell, Ammo, Clock, Door, DoorState, Event, EventLog, Fear, Goal, Health, Hearing,
     Inventory, Kind, Locomotion, Mood, Perceived, Position, Pos, RangedWeapon,
@@ -225,7 +226,7 @@ impl Scenario for CabinAmbush {
         schedule.add_systems((
             furniture_emit_system, emit_combat_sounds, emit_movement_sounds,
             update_sight, update_hearing, update_smell,
-            tick_status_effects, footing_check, retaliation_system,
+            tick_status_effects, tick_fire, footing_check, retaliation_system,
             fear_from_combat, decay_coatings,
         ).chain().after(handle_door_use));
         schedule

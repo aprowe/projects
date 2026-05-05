@@ -15,12 +15,14 @@ pub mod components;
 pub mod dialog;
 pub mod dice;
 pub mod door;
+pub mod fire;
 pub mod furniture;
 pub mod inject;
 pub mod items;
 pub mod library;
 pub mod log;
 pub mod needs;
+pub mod npc_schedule;
 pub mod pathfind;
 pub mod physics;
 pub mod quality;
@@ -51,6 +53,7 @@ pub use dialog::{
     Identity, Knowledge, Observer, Suspicion,
 };
 pub use door::{door_at, door_voxel_sync, Door, DoorState};
+pub use fire::{tick_fire, Burning};
 pub use furniture::{
     furniture_emit_system, tick_carrying, Carried, Climbable, Container, Furniture,
     FurnitureKind, Haulable, LightSource, Painting, PowerSource, Powered, Rug, Stair, Window,
@@ -79,6 +82,7 @@ pub use log::{narrate, Event, EventLog};
 pub use needs::{
     derive_mood, eat_on_use, fear_from_combat, tick_needs, Edible, Energy, Fear, Hunger, Mood,
 };
+pub use npc_schedule::{tick_schedules, Activity, Schedule, ScheduleEntry};
 pub use pathfind::find_path;
 pub use quality::{narrate_label, Paint, Quality, Style, Value};
 pub use render::{

@@ -170,6 +170,37 @@ struct AppState {
     ticks: u64,
     /// Display label for the active scenario.
     scenario_label: String,
+    /// Active map overlay (tints the bg of each cell). Cycle with
+    /// `o` (none → light → sound → temperature → none).
+    overlay: OverlayMode,
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Debug, Default)]
+enum OverlayMode {
+    #[default]
+    None,
+    Light,
+    Sound,
+    Temperature,
+}
+
+impl OverlayMode {
+    fn next(self) -> Self {
+        match self {
+            OverlayMode::None => OverlayMode::Light,
+            OverlayMode::Light => OverlayMode::Sound,
+            OverlayMode::Sound => OverlayMode::Temperature,
+            OverlayMode::Temperature => OverlayMode::None,
+        }
+    }
+    fn label(self) -> &'static str {
+        match self {
+            OverlayMode::None => "—",
+            OverlayMode::Light => "light",
+            OverlayMode::Sound => "sound",
+            OverlayMode::Temperature => "heat",
+        }
+    }
 }
 
 impl AppState {
@@ -193,6 +224,7 @@ impl AppState {
             flash: None,
             ticks: 0,
             scenario_label: String::new(),
+            overlay: OverlayMode::None,
         }
     }
 
@@ -312,6 +344,11 @@ fn handle_key(
             // Rewind to start
             KeyCode::Char('r') => {
                 return KeyOutcome::Rewind(0);
+            }
+            // Cycle overlays (none → light → sound → temperature)
+            KeyCode::Char('o') => {
+                state.overlay = state.overlay.next();
+                state.flash(format!("overlay: {}", state.overlay.label()));
             }
             // Scenario picker
             KeyCode::Char('m') => {
@@ -650,6 +687,9 @@ fn draw_map(f: &mut ratatui::Frame, area: Rect, sim: &mut Simulation, state: &Ap
         overlay.entry((pos.x, pos.y)).or_insert((glyph, color));
     }
 
+    // Build the active overlay layer (tile -> intensity 0..1) for
+    // light/sound/temperature. Done before borrowing voxel_world.
+    let layer = compute_overlay(sim, state);
     let voxel_world = sim.world.resource::<VoxelWorld>();
     for (row_idx, y) in (state.ascii.min.y..=state.ascii.max.y).enumerate() {
         if row_idx as u16 >= inner.height {
@@ -660,7 +700,15 @@ fn draw_map(f: &mut ratatui::Frame, area: Rect, sim: &mut Simulation, state: &Ap
             let pos = Pos::new(x, y, z);
             let voxel = voxel_world.voxel(pos);
             let mat = voxel_world.material(voxel.material);
-            let bg = mat.map(|m| m.color).unwrap_or([20, 20, 24]);
+            let mut bg = mat.map(|m| m.color).unwrap_or([20, 20, 24]);
+            // Tint the background with overlay intensity.
+            if let Some(intensity) = layer.get(&(x, y)).copied() {
+                bg = tint_for_overlay(bg, intensity, state.overlay);
+            } else if state.overlay != OverlayMode::None {
+                // Tiles outside any source: dim the background so
+                // light/heat areas stand out against darkness.
+                bg = mix(bg, [0, 0, 0], 0.65);
+            }
             let (glyph, fg) = match overlay.get(&(x, y)) {
                 Some((g, c)) => (*g, *c),
                 None => (
@@ -686,6 +734,154 @@ fn draw_map(f: &mut ratatui::Frame, area: Rect, sim: &mut Simulation, state: &Ap
     }
     let para = Paragraph::new(Text::from(lines));
     f.render_widget(para, inner);
+}
+
+/// Compute per-tile intensity (0..1) for the active overlay.
+/// - Light: sum of nearby `LightSource.lumens` with 1/(1+d²) falloff,
+///   plus the time-of-day ambient.
+/// - Sound: sum of recent `SoundEmitted` events (last 4 ticks), with
+///   linear distance falloff.
+/// - Temperature: sum of `Powered.heat_per_tick` from on-devices in
+///   range, plus burning entities, with quadratic falloff.
+fn compute_overlay(
+    sim: &mut Simulation,
+    state: &AppState,
+) -> std::collections::HashMap<(i32, i32), f32> {
+    use fortress_engine::{Clock, EventLog, Event, LightSource, Powered, Position};
+    let mut map: std::collections::HashMap<(i32, i32), f32> = Default::default();
+    let z = state.z;
+    let mode = state.overlay;
+    if mode == OverlayMode::None {
+        return map;
+    }
+
+    match mode {
+        OverlayMode::Light => {
+            // Ambient from time-of-day baseline.
+            let ambient_lux = sim
+                .world
+                .resource::<Clock>()
+                .time_of_day()
+                .ambient_lux();
+            let ambient = (ambient_lux / 2400.0).clamp(0.0, 1.0);
+            for y in state.ascii.min.y..=state.ascii.max.y {
+                for x in state.ascii.min.x..=state.ascii.max.x {
+                    map.insert((x, y), ambient);
+                }
+            }
+            // Add point lights (LightSource with on Powered, or just LightSource).
+            type Row = (Pos, f32, bool);
+            let lights: Vec<Row> = {
+                let mut q = sim.world.query::<(&Position, &LightSource, Option<&Powered>)>();
+                q.iter(&sim.world)
+                    .map(|(p, l, pw)| (p.0, l.lumens, pw.map(|p| p.on).unwrap_or(true)))
+                    .collect()
+            };
+            for (lpos, lumens, on) in lights {
+                if !on || lpos.z != z {
+                    continue;
+                }
+                // Tiles within sqrt(lumens/40) get a bump.
+                let radius = ((lumens / 40.0).sqrt() as i32).max(2);
+                for dy in -radius..=radius {
+                    for dx in -radius..=radius {
+                        let p = (lpos.x + dx, lpos.y + dy);
+                        let d2 = (dx * dx + dy * dy) as f32;
+                        let contrib = (lumens / 800.0) / (1.0 + d2 * 0.5);
+                        let v = map.entry(p).or_insert(0.0);
+                        *v = (*v + contrib).min(1.5);
+                    }
+                }
+            }
+        }
+        OverlayMode::Sound => {
+            // Aggregate the last 4 ticks of SoundEmitted events.
+            let now = sim.world.resource::<Clock>().tick;
+            let log = sim.world.resource::<EventLog>();
+            let lookback = now.saturating_sub(4);
+            for (t, e) in log.all() {
+                if *t < lookback {
+                    continue;
+                }
+                if let Event::SoundEmitted { position, intensity, .. } = e {
+                    if position.z != z {
+                        continue;
+                    }
+                    let radius = ((intensity * 12.0) as i32).max(2);
+                    for dy in -radius..=radius {
+                        for dx in -radius..=radius {
+                            let p = (position.x + dx, position.y + dy);
+                            let d = ((dx * dx + dy * dy) as f32).sqrt();
+                            let contrib = (intensity * (1.0 - d / radius as f32)).max(0.0);
+                            let v = map.entry(p).or_insert(0.0);
+                            *v = (*v + contrib).min(1.0);
+                        }
+                    }
+                }
+            }
+        }
+        OverlayMode::Temperature => {
+            // Sources of heat: Powered devices that are on with
+            // heat_per_tick > 0, plus Burning entities.
+            type HeatRow = (Pos, f32);
+            let sources: Vec<HeatRow> = {
+                let mut q = sim.world.query::<(&Position, &Powered)>();
+                q.iter(&sim.world)
+                    .filter(|(_, p)| p.on && p.heat_per_tick > 0.0)
+                    .map(|(p, pw)| (p.0, pw.heat_per_tick))
+                    .collect()
+            };
+            for (lpos, heat) in sources {
+                if lpos.z != z {
+                    continue;
+                }
+                let radius = ((heat).sqrt() as i32 + 1).max(2);
+                for dy in -radius..=radius {
+                    for dx in -radius..=radius {
+                        let p = (lpos.x + dx, lpos.y + dy);
+                        let d2 = (dx * dx + dy * dy) as f32;
+                        let contrib = (heat / 10.0) / (1.0 + d2 * 0.6);
+                        let v = map.entry(p).or_insert(0.0);
+                        *v = (*v + contrib).min(1.5);
+                    }
+                }
+            }
+        }
+        OverlayMode::None => {}
+    }
+    map
+}
+
+/// Mix the overlay tint into the base background based on intensity.
+fn tint_for_overlay(bg: [u8; 3], intensity: f32, mode: OverlayMode) -> [u8; 3] {
+    let i = intensity.clamp(0.0, 1.0);
+    let darken = mix(bg, [0, 0, 0], 0.55);
+    match mode {
+        // Light: lerp from dark to a warm white based on intensity.
+        OverlayMode::Light => {
+            let warm_white = [255, 235, 180];
+            mix(darken, warm_white, (i * 0.95).min(0.95))
+        }
+        // Sound: blue/cyan ripples.
+        OverlayMode::Sound => {
+            let cyan = [80, 200, 240];
+            mix(darken, cyan, i.min(0.95))
+        }
+        // Temperature: deep red when hot, dark blue when cold (ambient).
+        OverlayMode::Temperature => {
+            let hot = [240, 80, 30];
+            mix(darken, hot, (i * 0.9).min(0.95))
+        }
+        OverlayMode::None => bg,
+    }
+}
+
+fn mix(a: [u8; 3], b: [u8; 3], t: f32) -> [u8; 3] {
+    let lerp = |x: u8, y: u8| -> u8 {
+        let v = (x as f32) * (1.0 - t) + (y as f32) * t;
+        v.round().clamp(0.0, 255.0) as u8
+    };
+    [lerp(a[0], b[0]), lerp(a[1], b[1]), lerp(a[2], b[2])]
 }
 
 fn glyph_for_voxel(ascii: &AsciiRenderer, vw: &VoxelWorld, pos: Pos) -> char {
@@ -874,7 +1070,7 @@ fn draw_footer(f: &mut ratatui::Frame, area: Rect, state: &mut AppState) {
     let play = if state.auto_play { "▶ playing" } else { "⏸ paused" };
     let line = if let Some(m) = flash {
         format!(
-            "[{label}] {play}  {ms}ms  tick {tick}  z={z}  | {m}  | space/f step • b back1 • </> ±10 • r restart • p play • m menu • g god • q quit",
+            "[{label}] {play}  {ms}ms  tick {tick}  z={z}  | {m}  | space/f step • b back1 • </> ±10 • r restart • p play • m menu • g god • o overlay • q quit",
             label = state.scenario_label,
             ms = state.pace_ms,
             tick = state.ticks,
@@ -882,7 +1078,7 @@ fn draw_footer(f: &mut ratatui::Frame, area: Rect, state: &mut AppState) {
         )
     } else {
         format!(
-            "[{label}] {play}  {ms}ms  tick {tick}  z={z}  | arrows cursor • click select • space/f step • b back1 • </> ±10 • r restart • [ ] z • +/- speed • p play • m menu • g god • q quit",
+            "[{label}] {play}  {ms}ms  tick {tick}  z={z}  | arrows cursor • click select • space/f step • b back1 • </> ±10 • r restart • [ ] z • +/- speed • p play • m menu • g god • o overlay • q quit",
             label = state.scenario_label,
             ms = state.pace_ms,
             tick = state.ticks,
