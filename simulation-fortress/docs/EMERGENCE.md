@@ -433,6 +433,62 @@ that's the engine's signal.
 
 ---
 
+## Newlywed couple stranded on a desert island
+
+**Desired emergent**
+
+- A man and a woman wash up after a wreck. Day 1: panic, dehydration,
+  improvising shelter from driftwood and palm fronds. Day N: a daily
+  rhythm — fish at dawn, gather coconuts midday, sleep at dusk.
+- Weather pushes them around: a rainstorm fills the rain catcher; a
+  hot day spikes thirst; a hurricane levels the shelter.
+- A passing animal — a sea turtle, a coconut crab, a curious gull —
+  becomes either food or threat depending on personality and tools.
+- A passing ship is a one-shot event. They have to light a signal
+  fire fast (gather wood + flame source + propagation) or it's gone.
+- Resources deplete. Coconuts on a tree → empty, regrow in N days.
+  Fish in the lagoon → wary after several catches.
+
+**Generic systems this surfaces**
+
+- **Resource harvesting / depletion** — entities with
+  `Resource { kind, amount, regen_rate }`. UseEntity drains it; a
+  per-tick regen system tops it back up.
+- **Crafting** — `Recipe { inputs: Vec<(Material, qty)>, output:
+  ItemTemplate, station: Option<EntityKind> }`. A `craft` task at a
+  station with the right inputs in inventory produces the output.
+- **Weather** as a `Weather` resource with kind + intensity; affects
+  Need decay rates (Hot weather → faster Thirst), Coating volatility
+  (Rain dries puddles slower), and entity behavior (storms scare
+  most creatures into Goal::Hide).
+- **Animals** = creatures with their own planners (already supported);
+  add a `Wild { fearful_of: Vec<Faction> }` so animal AI runs from
+  humans by default.
+- **Procedural events** — a `EventSpawner` resource keyed by tick
+  range with weighted random triggers ("storm", "passing ship",
+  "coconut tree empty", "shark in the lagoon").
+- **Day/night + calendar** — a `Calendar { day, hour }` resource
+  with reproducible weather schedules and event timing.
+
+The two big new systems this scenario forces: **crafting (recipes +
+station + inventory consumption)** and **resource depletion + regen**.
+Both are also load-bearing for D-Day (medical kits, ammo), restaurant
+(orders → recipes), zombie (improvised barricades), farming
+(seasons + harvest cycles).
+
+This scenario is the canonical use case for the eventual
+**AI-driven open-ended game mode** the project is moving toward.
+The player types: "the man chops down a tree with a rock" — the AI
+either matches it to existing primitives (Acquire stone → Task::UseEntity
+on tree → spawn `wood_logs` Coating/Item; the engine already has
+all of this) OR it generates the missing recipe / component on the
+fly. "Ties branches with vines" might require a new Recipe (vines
++ branches → "rope") + a new ItemTemplate ("rope") that the AI
+adds to the Library. "Builds a raft" then composes (rope +
+wood_logs → "raft" via existing crafting). The Scribblenauts loop:
+existing primitives where possible, LLM-authored extensions where
+needed.
+
 ## Cross-cutting takeaways
 
 A handful of generic systems would feed *most* of the scenarios above:

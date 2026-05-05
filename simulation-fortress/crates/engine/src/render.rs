@@ -25,6 +25,12 @@ impl Renderer for NullRenderer {
     fn frame(&mut self, _world: &mut World, _tick: Tick) {}
 }
 
+impl<R: Renderer + ?Sized> Renderer for &mut R {
+    fn frame(&mut self, world: &mut World, tick: Tick) {
+        (**self).frame(world, tick)
+    }
+}
+
 /// Run two renderers in sequence on each frame.
 pub struct CompositeRenderer<A: Renderer, B: Renderer>(pub A, pub B);
 
@@ -37,6 +43,7 @@ impl<A: Renderer, B: Renderer> Renderer for CompositeRenderer<A, B> {
 
 /// Renders a single Z-slice of the world as ASCII to stdout. Living
 /// entities on the slice are overlaid on top of voxel glyphs.
+#[derive(Clone)]
 pub struct AsciiRenderer {
     pub min: Pos,
     pub max: Pos,
@@ -120,10 +127,15 @@ impl AsciiRenderer {
     }
 }
 
-impl Renderer for AsciiRenderer {
-    fn frame(&mut self, world: &mut World, tick: Tick) {
+impl AsciiRenderer {
+    /// Render the world's current Z-slice as a multi-line string,
+    /// independent of stdout. Includes a header and trailing blank
+    /// line. Returns `None` when the configured `frame_every` skips
+    /// this tick. `frame()` calls this and prints; the replay
+    /// renderer captures the same string for HTML embedding.
+    pub fn frame_to_string(&mut self, world: &mut World, tick: Tick) -> Option<String> {
         if tick != 0 && !tick.is_multiple_of(self.frame_every) {
-            return;
+            return None;
         }
 
         let mut overlay: HashMap<(i32, i32), char> = HashMap::new();
@@ -131,9 +143,6 @@ impl Renderer for AsciiRenderer {
         let mut alive = 0usize;
         let mut q = world.query::<(&Kind, &Position, Option<&Health>, Option<&Faction>)>();
         for (kind, pos, health, faction) in q.iter(world) {
-            // Things with Health are creatures we count for the alive
-            // tally; things without (furniture, hazards) render only
-            // if the scenario has registered a glyph for their kind.
             if let Some(h) = health {
                 total += 1;
                 if !h.is_alive() {
@@ -162,23 +171,31 @@ impl Renderer for AsciiRenderer {
         }
 
         let voxel_world = world.resource::<VoxelWorld>();
-
-        println!(
-            "── tick {tick:>4} ── z={} ── entities {}/{} alive ──",
+        let mut out = String::new();
+        out.push_str(&format!(
+            "── tick {tick:>4} ── z={} ── entities {}/{} alive ──\n",
             self.z, alive, total
-        );
+        ));
         for y in self.min.y..=self.max.y {
-            let mut row = String::with_capacity((self.max.x - self.min.x + 1) as usize);
             for x in self.min.x..=self.max.x {
                 let glyph = overlay
                     .get(&(x, y))
                     .copied()
                     .unwrap_or_else(|| self.glyph_for_voxel(voxel_world, Pos::new(x, y, self.z)));
-                row.push(glyph);
+                out.push(glyph);
             }
-            println!("{row}");
+            out.push('\n');
         }
-        println!();
+        out.push('\n');
+        Some(out)
+    }
+}
+
+impl Renderer for AsciiRenderer {
+    fn frame(&mut self, world: &mut World, tick: Tick) {
+        if let Some(s) = self.frame_to_string(world, tick) {
+            print!("{s}");
+        }
     }
 }
 

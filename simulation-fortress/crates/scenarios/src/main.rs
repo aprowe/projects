@@ -8,11 +8,13 @@ use fortress_engine::{
     LogRenderer, Mood, PartHealth, PartOf, PartStatus, Position, Pos, Renderer, RunOptions,
     Scenario, Simulation, VoxelWorld, Wearing,
 };
+use replay::ReplayRenderer;
 
 mod family_home;
 mod farming;
 mod home_invasion;
 mod office;
+mod replay;
 
 fn main() {
     let mut args = env::args().skip(1);
@@ -21,6 +23,7 @@ fn main() {
     let mut repl = false;
     let mut max_ticks: u64 = 200;
     let mut pace_ms: u64 = 400;
+    let mut replay_html_path: Option<std::path::PathBuf> = None;
 
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -35,13 +38,16 @@ fn main() {
             "--pace-ms" => {
                 pace_ms = args.next().and_then(|v| v.parse().ok()).unwrap_or(pace_ms);
             }
+            "--replay-html" => {
+                replay_html_path = args.next().map(std::path::PathBuf::from);
+            }
             other if !other.starts_with("--") && scenario_name.is_none() => {
                 scenario_name = Some(other.to_string());
             }
             other => {
                 eprintln!("unknown argument: {other}");
                 eprintln!(
-                    "usage: fortress [scenario] [--fast] [--repl] [--ticks N] [--pace-ms N]"
+                    "usage: fortress [scenario] [--fast] [--repl] [--ticks N] [--pace-ms N] [--replay-html FILE]"
                 );
                 std::process::exit(2);
             }
@@ -64,55 +70,51 @@ fn main() {
     let final_tick = match scenario_name.as_str() {
         "home_invasion" => {
             let mut scenario = home_invasion::HomeInvasion;
-            let log = LogRenderer::default();
             let ascii = AsciiRenderer::new(Pos::new(-1, -4, 0), Pos::new(8, 8, 0))
                 .at_z(0)
                 .frame_every(1)
                 .entity_kind("intruder", 'I')
                 .faction("family", 'f');
-            let mut renderer = CompositeRenderer(log, ascii);
-            let t = drive(&mut sim, &mut scenario, options, &mut renderer, repl);
-            print_summary(&scenario, &mut sim, t);
-            t
+            run_with_optional_replay(
+                &mut sim, &mut scenario, options, ascii, repl,
+                replay_html_path.clone(), "home invasion",
+            )
         }
         "farming" => {
             let mut scenario = farming::Farming;
-            let log = LogRenderer::default();
             let ascii = AsciiRenderer::new(Pos::new(-1, -1, 0), Pos::new(7, 7, 0))
                 .at_z(0)
                 .frame_every(2)
                 .faction("farm", 'F');
-            let mut renderer = CompositeRenderer(log, ascii);
-            let t = drive(&mut sim, &mut scenario, options, &mut renderer, repl);
-            print_summary(&scenario, &mut sim, t);
-            t
+            run_with_optional_replay(
+                &mut sim, &mut scenario, options, ascii, repl,
+                replay_html_path.clone(), "farming",
+            )
         }
         "office" => {
             let mut scenario = office::OfficeDrama;
-            let log = LogRenderer::default();
             let ascii = AsciiRenderer::new(Pos::new(0, 0, 0), Pos::new(11, 9, 0))
                 .at_z(0)
                 .frame_every(5)
                 .faction("office", 'o');
-            let mut renderer = CompositeRenderer(log, ascii);
-            let t = drive(&mut sim, &mut scenario, options, &mut renderer, repl);
-            print_summary(&scenario, &mut sim, t);
-            t
+            run_with_optional_replay(
+                &mut sim, &mut scenario, options, ascii, repl,
+                replay_html_path.clone(), "office drama",
+            )
         }
         "family_home" => {
             let mut scenario = family_home::FamilyHome;
-            let log = LogRenderer::default();
             let ascii = AsciiRenderer::new(Pos::new(-1, -1, 0), Pos::new(10, 10, 0))
                 .at_z(0)
-                .frame_every(2)
+                .frame_every(1)
                 .faction("invader", 'I')
                 .faction("family", 'f')
                 .faction("kid", 'k')
                 .faction("feral", 'D');
-            let mut renderer = CompositeRenderer(log, ascii);
-            let t = drive(&mut sim, &mut scenario, options, &mut renderer, repl);
-            print_summary(&scenario, &mut sim, t);
-            t
+            run_with_optional_replay(
+                &mut sim, &mut scenario, options, ascii, repl,
+                replay_html_path.clone(), "family home invasion",
+            )
         }
         other => {
             eprintln!("unknown scenario: {other}");
@@ -122,6 +124,37 @@ fn main() {
     };
 
     println!("done at tick {final_tick}");
+}
+
+/// Wrap the standard LogRenderer + AsciiRenderer chain, optionally
+/// adding a ReplayRenderer that captures every frame and writes a
+/// self-contained HTML file at the end of the run.
+fn run_with_optional_replay<S: Scenario>(
+    sim: &mut Simulation,
+    scenario: &mut S,
+    options: RunOptions,
+    ascii: AsciiRenderer,
+    repl: bool,
+    replay_path: Option<std::path::PathBuf>,
+    title: &str,
+) -> u64 {
+    let log = LogRenderer::default();
+    let t = if let Some(path) = replay_path {
+        let mut replay = ReplayRenderer::new(ascii.clone(), path.clone(), title);
+        let mut renderer = CompositeRenderer(CompositeRenderer(log, ascii), &mut replay);
+        let t = drive(sim, scenario, options, &mut renderer, repl);
+        if let Err(e) = replay.flush_html() {
+            eprintln!("failed to write replay html: {e}");
+        } else {
+            eprintln!("[replay] wrote {} ({} frames)", path.display(), replay.frame_count());
+        }
+        t
+    } else {
+        let mut renderer = CompositeRenderer(log, ascii);
+        drive(sim, scenario, options, &mut renderer, repl)
+    };
+    print_summary(scenario, sim, t);
+    t
 }
 
 /// Drive a scenario either headlessly via `Simulation::run_with` or
