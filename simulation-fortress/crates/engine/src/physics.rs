@@ -69,12 +69,45 @@ impl Locomotion {
 
 /// A puddle, slick, dust patch, blood splatter — any material
 /// covering a tile and interacting with whatever moves through it.
-/// Volume is read but not yet consumed (drying, blotting, fire-spread
-/// will hook in here).
+/// `volume` shrinks each tick at a rate driven by the material's
+/// `volatility`; once it hits zero the entity is despawned.
 #[derive(Component, Clone, Debug)]
 pub struct Coating {
     pub material: MaterialId,
     pub volume: f32,
+}
+
+/// Each tick, evaporate a fraction of every coating proportional to
+/// its material's `volatility`. Coatings that drop to zero volume
+/// are despawned. Future: scale with ambient temperature.
+pub fn decay_coatings(world: &mut World) {
+    let mut decay: Vec<(Entity, f32)> = {
+        let mut q = world.query::<(Entity, &Coating)>();
+        q.iter(world)
+            .map(|(e, c)| {
+                let volatility = world
+                    .resource::<VoxelWorld>()
+                    .material(c.material)
+                    .map(|m| m.volatility)
+                    .unwrap_or(0.0);
+                (e, volatility * 0.01)
+            })
+            .collect()
+    };
+    decay.retain(|(_, d)| *d > 0.0);
+
+    let mut despawn: Vec<Entity> = Vec::new();
+    for (entity, drop) in decay {
+        if let Some(mut c) = world.get_mut::<Coating>(entity) {
+            c.volume -= drop;
+            if c.volume <= 0.0 {
+                despawn.push(entity);
+            }
+        }
+    }
+    for e in despawn {
+        world.despawn(e);
+    }
 }
 
 /// Effective friction at or above this is considered safe walking;

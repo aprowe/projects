@@ -48,6 +48,8 @@ impl Scenario for HomeInvasion {
                 density: 0.7,
                 flammable: true,
                 friction: 0.55,
+                smell_intensity: 0.05,
+                volatility: 0.0,
             });
             let grass = vw.register_material(Material {
                 name: "grass".into(),
@@ -55,36 +57,8 @@ impl Scenario for HomeInvasion {
                 density: 0.1,
                 flammable: true,
                 friction: 0.8,
-            });
-            // Pre-register a few fluids/coatings the player can pour
-            // mid-run via the REPL: `{"action":"Coat","at":...,"material":"oil"}`.
-            vw.register_material(Material {
-                name: "oil".into(),
-                solid: false,
-                density: 0.9,
-                flammable: true,
-                friction: 0.05,
-            });
-            vw.register_material(Material {
-                name: "water".into(),
-                solid: false,
-                density: 1.0,
-                flammable: false,
-                friction: 0.4,
-            });
-            vw.register_material(Material {
-                name: "ice".into(),
-                solid: true,
-                density: 0.9,
-                flammable: false,
-                friction: 0.1,
-            });
-            vw.register_material(Material {
-                name: "blood".into(),
-                solid: false,
-                density: 1.05,
-                flammable: false,
-                friction: 0.25,
+                smell_intensity: 0.05,
+                volatility: 0.0,
             });
             (wood, grass)
         };

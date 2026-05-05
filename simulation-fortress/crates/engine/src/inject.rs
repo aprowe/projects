@@ -28,8 +28,11 @@ use crate::library::{
     ensure_material as library_ensure_material, spawn_item_template, spawn_role_template,
     ItemSpawnOpts, Library, RoleSpawnOpts,
 };
+use crate::log::{Event, EventLog};
 use crate::physics::Coating;
+use crate::sound::SoundKind;
 use crate::tasks::{Goal, Task, TaskQueue};
+use crate::time::Clock;
 use crate::world::{MaterialId, Pos, Voxel, VoxelWorld};
 
 /// One mutation against the simulation world.
@@ -104,6 +107,13 @@ pub enum Action {
     Equip { wearer: EntityRef, item: EntityRef },
     /// Give an item directly into a holder's inventory.
     Give { holder: EntityRef, item: EntityRef },
+    /// Emit a Scream sound at the source entity's position. Used by
+    /// REPL/AI to make a specific creature panic/yell on cue.
+    Scream {
+        source: EntityRef,
+        #[serde(default = "default_scream_intensity")]
+        intensity: f32,
+    },
     /// Spawn from a library template by name. The library is searched
     /// for items first, then roles. Position is required for roles
     /// and for floor-spawn items; for items being equipped/given,
@@ -258,6 +268,9 @@ fn default_body_plan() -> String {
 fn default_volume() -> f32 {
     1.0
 }
+fn default_scream_intensity() -> f32 {
+    0.9
+}
 
 /// Apply one action to the world. On success returns a short
 /// description of what happened (suitable for echoing to a REPL).
@@ -411,6 +424,31 @@ pub fn apply_action(world: &mut World, action: &Action) -> Result<String, String
             let i = resolve_entity(world, item)?;
             give_item(world, h, i);
             Ok(format!("#{} given to #{}", i.index(), h.index()))
+        }
+        Action::Scream { source, intensity } => {
+            let entity = resolve_entity(world, source)?;
+            let pos = world
+                .get::<Position>(entity)
+                .map(|p| p.0)
+                .ok_or_else(|| format!("entity #{} has no position", entity.index()))?;
+            // REPL injection runs between ticks — the schedule for the
+            // current tick has already finished, so we queue the
+            // sound for the *next* tick where update_hearing will see
+            // it.
+            let next_tick = world.resource::<Clock>().tick + 1;
+            world.resource_mut::<EventLog>().push(
+                next_tick,
+                Event::SoundEmitted {
+                    source: Some(entity),
+                    position: pos,
+                    kind: SoundKind::Scream,
+                    intensity: intensity.clamp(0.0, 1.0),
+                },
+            );
+            Ok(format!(
+                "scream queued from #{} for tick {next_tick}",
+                entity.index()
+            ))
         }
         Action::Spawn {
             template,

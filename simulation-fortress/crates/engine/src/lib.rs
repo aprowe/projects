@@ -40,7 +40,7 @@ pub use library::{
     ensure_material, spawn_item_template, spawn_role_template, ItemSpawnOpts, ItemTemplate,
     Library, LibraryHit, RoleSpawnOpts, RoleTemplate,
 };
-pub use physics::{footing_check, Coating, Locomotion};
+pub use physics::{decay_coatings, footing_check, Coating, Locomotion};
 pub use components::{ExtraData, Faction, Health, Kind, Position};
 pub use items::{
     drop_item, equip_item, give_item, held_weapons_summary, item_world_position, unequip_item,
@@ -59,8 +59,9 @@ pub use rng::Rng;
 pub use scenario::Scenario;
 pub use simulation::{RunOptions, Simulation};
 pub use sound::{
-    emit_combat_sounds, emit_movement_sounds, emit_scream, update_hearing, HeardSound, Hearing,
-    Perceived, SoundKind,
+    emit_combat_sounds, emit_movement_sounds, emit_scream, update_hearing, update_sight,
+    update_smell, HeardSound, Hearing, Perceived, SeenEntity, Sight, Smell, SmelledOdor,
+    SoundKind,
 };
 pub use tasks::{
     execute_tasks, retaliation_system, Goal, RetaliateOnAttack, Task, TaskQueue,

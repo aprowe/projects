@@ -9,6 +9,7 @@ use fortress_engine::{
     Scenario, Simulation, VoxelWorld, Wearing,
 };
 
+mod family_home;
 mod farming;
 mod home_invasion;
 mod office;
@@ -98,9 +99,24 @@ fn main() {
             print_summary(&scenario, &mut sim, t);
             t
         }
+        "family_home" => {
+            let mut scenario = family_home::FamilyHome;
+            let log = LogRenderer::default();
+            let ascii = AsciiRenderer::new(Pos::new(-1, -1, 0), Pos::new(10, 10, 0))
+                .at_z(0)
+                .frame_every(2)
+                .faction("invader", 'I')
+                .faction("family", 'f')
+                .faction("kid", 'k')
+                .faction("feral", 'D');
+            let mut renderer = CompositeRenderer(log, ascii);
+            let t = drive(&mut sim, &mut scenario, options, &mut renderer, repl);
+            print_summary(&scenario, &mut sim, t);
+            t
+        }
         other => {
             eprintln!("unknown scenario: {other}");
-            eprintln!("available: home_invasion, farming, office");
+            eprintln!("available: home_invasion, farming, office, family_home");
             std::process::exit(1);
         }
     };

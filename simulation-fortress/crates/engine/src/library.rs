@@ -349,42 +349,54 @@ fn populate_defaults(lib: &mut Library) {
 }
 
 fn populate_materials(lib: &mut Library) {
-    let mat = |name: &str, solid, density, flammable, friction| Material {
-        name: name.into(),
-        solid,
-        density,
-        flammable,
-        friction,
+    let mat = |name: &str,
+               solid,
+               density,
+               flammable,
+               friction,
+               smell_intensity,
+               volatility|
+     -> Material {
+        Material {
+            name: name.into(),
+            solid,
+            density,
+            flammable,
+            friction,
+            smell_intensity,
+            volatility,
+        }
     };
     let entries = [
         // structural
-        mat("wood", true, 0.7, true, 0.55),
-        mat("stone", true, 2.5, false, 0.7),
-        mat("brick", true, 1.9, false, 0.65),
-        mat("steel", true, 7.8, false, 0.5),
-        mat("iron", true, 7.2, false, 0.5),
-        mat("glass", true, 2.5, false, 0.4),
+        mat("wood",   true, 0.7, true,  0.55, 0.05, 0.0),
+        mat("stone",  true, 2.5, false, 0.70, 0.00, 0.0),
+        mat("brick",  true, 1.9, false, 0.65, 0.00, 0.0),
+        mat("steel",  true, 7.8, false, 0.50, 0.00, 0.0),
+        mat("iron",   true, 7.2, false, 0.50, 0.05, 0.0),
+        mat("glass",  true, 2.5, false, 0.40, 0.00, 0.0),
         // soft / wearable
-        mat("leather", false, 0.9, true, 0.85),
-        mat("rubber", false, 1.2, true, 0.95),
-        mat("wool", false, 0.3, true, 0.7),
-        mat("cotton", false, 0.4, true, 0.7),
+        mat("leather", false, 0.9, true, 0.85, 0.10, 0.0),
+        mat("rubber",  false, 1.2, true, 0.95, 0.05, 0.0),
+        mat("wool",    false, 0.3, true, 0.70, 0.05, 0.0),
+        mat("cotton",  false, 0.4, true, 0.70, 0.00, 0.0),
         // ground / vegetation
-        mat("grass", false, 0.1, true, 0.8),
-        mat("soil", false, 1.5, false, 0.7),
-        mat("sand", false, 1.6, false, 0.6),
-        mat("dirt", false, 1.4, false, 0.75),
-        // fluids / coatings
-        mat("water", false, 1.0, false, 0.4),
-        mat("oil", false, 0.9, true, 0.05),
-        mat("blood", false, 1.05, false, 0.25),
-        mat("ice", true, 0.9, false, 0.1),
-        mat("mud", false, 1.5, false, 0.5),
-        // food (low-ish friction when smashed; useful for the food-fight
-        // scenario, where lobbed food creates Coatings on impact)
-        mat("mashed_potato", false, 1.0, true, 0.3),
-        mat("ketchup", false, 1.1, false, 0.35),
-        mat("oatmeal", false, 0.9, true, 0.4),
+        mat("grass",  false, 0.1, true,  0.80, 0.05, 0.0),
+        mat("soil",   false, 1.5, false, 0.70, 0.05, 0.0),
+        mat("sand",   false, 1.6, false, 0.60, 0.00, 0.0),
+        mat("dirt",   false, 1.4, false, 0.75, 0.05, 0.0),
+        // fluids / coatings — volatility drives smell decay
+        mat("water",  false, 1.00, false, 0.40, 0.00, 0.40),
+        mat("oil",    false, 0.90, true,  0.05, 0.30, 0.05),
+        mat("blood",  false, 1.05, false, 0.25, 0.60, 0.10),
+        mat("ice",    true,  0.90, false, 0.10, 0.00, 0.20),
+        mat("mud",    false, 1.50, false, 0.50, 0.10, 0.05),
+        mat("urine",  false, 1.02, false, 0.30, 0.85, 0.20),
+        mat("vomit",  false, 1.00, false, 0.35, 0.70, 0.15),
+        // food
+        mat("mashed_potato", false, 1.0, true, 0.30, 0.20, 0.10),
+        mat("ketchup",       false, 1.1, false, 0.35, 0.30, 0.05),
+        mat("oatmeal",       false, 0.9, true, 0.40, 0.15, 0.10),
     ];
     for m in entries {
         lib.materials.insert(m.name.clone(), m);

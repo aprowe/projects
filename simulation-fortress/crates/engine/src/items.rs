@@ -142,16 +142,21 @@ impl Wearing {
 // ─── helpers ────────────────────────────────────────────────────────────────
 
 /// Place `item` into `holder`'s `Inventory`, creating the inventory if
-/// necessary, and emit an `ItemTaken` event.
+/// necessary, and emit an `ItemTaken` event. Also strips the item's
+/// `Position` so it is no longer "on the floor" — `drop_item` puts
+/// the position back when the holder lets it go.
 pub fn give_item(world: &mut World, holder: Entity, item: Entity) {
-    let mut entity_mut = world.entity_mut(holder);
-    if !entity_mut.contains::<Inventory>() {
-        entity_mut.insert(Inventory::default());
+    {
+        let mut entity_mut = world.entity_mut(holder);
+        if !entity_mut.contains::<Inventory>() {
+            entity_mut.insert(Inventory::default());
+        }
+        let mut inv = entity_mut.get_mut::<Inventory>().expect("just inserted");
+        if !inv.0.contains(&item) {
+            inv.0.push(item);
+        }
     }
-    let mut inv = entity_mut.get_mut::<Inventory>().expect("just inserted");
-    if !inv.0.contains(&item) {
-        inv.0.push(item);
-    }
+    world.entity_mut(item).remove::<Position>();
     let tick = world.resource::<Clock>().tick;
     world
         .resource_mut::<EventLog>()

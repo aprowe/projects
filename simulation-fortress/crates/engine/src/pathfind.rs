@@ -140,6 +140,8 @@ mod tests {
             density: 2.5,
             flammable: false,
             friction: 0.7,
+            smell_intensity: 0.0,
+            volatility: 0.0,
         })
     }
 

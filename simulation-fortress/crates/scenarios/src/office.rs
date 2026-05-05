@@ -60,6 +60,8 @@ impl Scenario for OfficeDrama {
                 density: 0.3,
                 flammable: true,
                 friction: 0.85,
+                smell_intensity: 0.05,
+                volatility: 0.0,
             })
         };
         note(world, "Monday morning at the office.");

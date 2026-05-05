@@ -50,6 +50,16 @@ pub struct Material {
     /// `physics::footing_check` to decide whether moving onto a tile
     /// makes a creature slip.
     pub friction: f32,
+    /// How strongly this material smells in `[0.0, 1.0]`. 0 =
+    /// odorless (water, stone, glass). Picked up by entities with
+    /// the `Smell` component when present in a `Coating`.
+    pub smell_intensity: f32,
+    /// How fast this material's `Coating.volume` shrinks per tick
+    /// (linear decay coefficient). 0 = persistent forever, 0.5 =
+    /// thin coating evaporates in ~200 ticks. Used by
+    /// `decay_coatings`. Higher temperatures will scale this once
+    /// ambient temperature is wired up.
+    pub volatility: f32,
 }
 
 impl Material {
@@ -60,6 +70,8 @@ impl Material {
             density: 0.0,
             flammable: false,
             friction: 1.0,
+            smell_intensity: 0.0,
+            volatility: 0.0,
         }
     }
 }
@@ -248,6 +260,8 @@ mod tests {
             density: 2.5,
             flammable: false,
             friction: 0.7,
+            smell_intensity: 0.0,
+            volatility: 0.0,
         })
     }
 

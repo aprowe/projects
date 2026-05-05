@@ -53,6 +53,8 @@ impl Scenario for Farming {
                 density: 1.5,
                 flammable: false,
                 friction: 0.7,
+                smell_intensity: 0.05,
+                volatility: 0.0,
             });
             vw.register_material(Material {
                 name: "wheat".into(),
@@ -60,6 +62,8 @@ impl Scenario for Farming {
                 density: 0.4,
                 flammable: true,
                 friction: 0.7,
+                smell_intensity: 0.0,
+                volatility: 0.0,
             });
             soil
         };

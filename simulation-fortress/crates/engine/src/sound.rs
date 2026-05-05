@@ -92,6 +92,58 @@ impl Hearing {
     }
 }
 
+/// How well the entity sees. Voxel walls block line of sight.
+#[derive(Component, Copy, Clone, Debug)]
+pub struct Sight {
+    pub range: i32,
+}
+
+impl Sight {
+    pub fn keen() -> Self {
+        Self { range: 24 }
+    }
+    pub fn normal() -> Self {
+        Self { range: 14 }
+    }
+    pub fn dim() -> Self {
+        Self { range: 6 }
+    }
+}
+
+/// How well the entity smells. Picks up odor from `Coating`
+/// materials via the materials' `smell_intensity` field.
+#[derive(Component, Copy, Clone, Debug)]
+pub struct Smell {
+    pub range: i32,
+}
+
+impl Smell {
+    pub fn keen() -> Self {
+        Self { range: 30 }
+    }
+    pub fn normal() -> Self {
+        Self { range: 10 }
+    }
+    pub fn dull() -> Self {
+        Self { range: 3 }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct SeenEntity {
+    pub entity: Entity,
+    pub position: Pos,
+    pub distance: i32,
+}
+
+#[derive(Clone, Debug)]
+pub struct SmelledOdor {
+    pub origin: Pos,
+    pub material_name: String,
+    pub apparent_intensity: f32,
+    pub distance: i32,
+}
+
 #[derive(Clone, Debug)]
 pub struct HeardSound {
     pub source: Option<Entity>,
@@ -106,6 +158,8 @@ pub struct HeardSound {
 #[derive(Component, Default, Debug)]
 pub struct Perceived {
     pub heard: Vec<HeardSound>,
+    pub seen: Vec<SeenEntity>,
+    pub smelled: Vec<SmelledOdor>,
 }
 
 impl Perceived {
@@ -122,6 +176,19 @@ impl Perceived {
 
     pub fn has_violent(&self) -> bool {
         self.loudest_violent().is_some()
+    }
+
+    pub fn nearest_seen(&self) -> Option<&SeenEntity> {
+        self.seen.iter().min_by_key(|s| s.distance)
+    }
+
+    /// The strongest odor currently sensed.
+    pub fn strongest_smell(&self) -> Option<&SmelledOdor> {
+        self.smelled.iter().max_by(|a, b| {
+            a.apparent_intensity
+                .partial_cmp(&b.apparent_intensity)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
     }
 }
 
@@ -269,14 +336,180 @@ pub fn update_hearing(world: &mut World) {
     }
 
     for (listener, heard) in updates {
-        if let Some(mut p) = world.get_mut::<Perceived>(listener) {
-            p.heard = heard;
-        } else {
-            world
-                .entity_mut(listener)
-                .insert(Perceived { heard });
+        let exists = world.get::<Perceived>(listener).is_some();
+        if exists {
+            if let Some(mut p) = world.get_mut::<Perceived>(listener) {
+                p.heard = heard;
+            }
+        } else if !heard.is_empty() {
+            world.entity_mut(listener).insert(Perceived {
+                heard,
+                seen: Vec::new(),
+                smelled: Vec::new(),
+            });
         }
     }
+}
+
+/// Walk every entity with `Sight` and write a fresh
+/// `Perceived.seen` list — every other living creature within range
+/// whose tile has a clear voxel line of sight from the observer.
+pub fn update_sight(world: &mut World) {
+    let observers: Vec<(Entity, Pos, i32)> = {
+        let mut q = world.query::<(Entity, &Position, &Sight)>();
+        q.iter(world).map(|(e, p, s)| (e, p.0, s.range)).collect()
+    };
+    let candidates: Vec<(Entity, Pos)> = {
+        let mut q = world
+            .query_filtered::<(Entity, &Position), bevy_ecs::query::With<crate::components::Health>>();
+        q.iter(world).map(|(e, p)| (e, p.0)).collect()
+    };
+
+    let mut updates: Vec<(Entity, Vec<SeenEntity>)> = Vec::with_capacity(observers.len());
+    for (observer, obs_pos, range) in observers {
+        let mut seen: Vec<SeenEntity> = Vec::new();
+        for (target, t_pos) in &candidates {
+            if observer == *target {
+                continue;
+            }
+            let dist = obs_pos.chebyshev(*t_pos);
+            if dist > range {
+                continue;
+            }
+            if line_of_sight_blocked(world, obs_pos, *t_pos) {
+                continue;
+            }
+            seen.push(SeenEntity {
+                entity: *target,
+                position: *t_pos,
+                distance: dist,
+            });
+        }
+        seen.sort_by_key(|s| s.distance);
+        updates.push((observer, seen));
+    }
+
+    for (observer, seen) in updates {
+        let exists = world.get::<Perceived>(observer).is_some();
+        if exists {
+            if let Some(mut p) = world.get_mut::<Perceived>(observer) {
+                p.seen = seen;
+            }
+        } else if !seen.is_empty() {
+            world.entity_mut(observer).insert(Perceived {
+                heard: Vec::new(),
+                seen,
+                smelled: Vec::new(),
+            });
+        }
+    }
+}
+
+/// Walk every entity with `Smell` and write a fresh
+/// `Perceived.smelled` list. Smell sources are `Coating` entities;
+/// a coating's odor strength is its material's `smell_intensity`.
+/// Apparent intensity attenuates with distance: a sniffer at
+/// distance d from a strength-s coating perceives s * (1 - d/(R*s)).
+pub fn update_smell(world: &mut World) {
+    use crate::physics::Coating;
+    use crate::world::VoxelWorld;
+
+    let sniffers: Vec<(Entity, Pos, i32)> = {
+        let mut q = world.query::<(Entity, &Position, &Smell)>();
+        q.iter(world).map(|(e, p, s)| (e, p.0, s.range)).collect()
+    };
+    if sniffers.is_empty() {
+        return;
+    }
+
+    // Snapshot every coating: position + material info, with the
+    // coating's current `volume` already folded into the source
+    // intensity so a near-evaporated puddle smells weaker.
+    let coatings: Vec<(Pos, String, f32)> = {
+        let mut q = world.query::<(&Position, &Coating)>();
+        let vw = world.resource::<VoxelWorld>();
+        q.iter(world)
+            .filter_map(|(p, c)| {
+                vw.material(c.material).and_then(|mat| {
+                    let base = mat.smell_intensity;
+                    let effective = base * c.volume.clamp(0.0, 1.0);
+                    if effective <= 0.0 {
+                        None
+                    } else {
+                        Some((p.0, mat.name.clone(), effective))
+                    }
+                })
+            })
+            .collect()
+    };
+
+    let mut updates: Vec<(Entity, Vec<SmelledOdor>)> = Vec::with_capacity(sniffers.len());
+    for (sniffer, sniff_pos, range) in sniffers {
+        let mut smelled: Vec<SmelledOdor> = Vec::new();
+        for (origin, material_name, source_intensity) in &coatings {
+            let dist = sniff_pos.chebyshev(*origin);
+            let effective_range = (range as f32 * *source_intensity).max(1.0);
+            if dist as f32 > effective_range {
+                continue;
+            }
+            let apparent = (1.0 - (dist as f32 / effective_range)).clamp(0.0, 1.0)
+                * *source_intensity;
+            smelled.push(SmelledOdor {
+                origin: *origin,
+                material_name: material_name.clone(),
+                apparent_intensity: apparent,
+                distance: dist,
+            });
+        }
+        smelled.sort_by(|a, b| {
+            b.apparent_intensity
+                .partial_cmp(&a.apparent_intensity)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        updates.push((sniffer, smelled));
+    }
+
+    for (sniffer, smelled) in updates {
+        let exists = world.get::<Perceived>(sniffer).is_some();
+        if exists {
+            if let Some(mut p) = world.get_mut::<Perceived>(sniffer) {
+                p.smelled = smelled;
+            }
+        } else if !smelled.is_empty() {
+            world.entity_mut(sniffer).insert(Perceived {
+                heard: Vec::new(),
+                seen: Vec::new(),
+                smelled,
+            });
+        }
+    }
+}
+
+fn line_of_sight_blocked(world: &World, a: Pos, b: Pos) -> bool {
+    use crate::world::VoxelWorld;
+    let voxel_world = world.resource::<VoxelWorld>();
+    let dx = (b.x - a.x) as f32;
+    let dy = (b.y - a.y) as f32;
+    let dz = (b.z - a.z) as f32;
+    let dist = (dx * dx + dy * dy + dz * dz).sqrt();
+    if dist <= 1.5 {
+        return false;
+    }
+    let steps = (dist * 2.0).ceil() as i32;
+    for i in 1..steps {
+        let t = i as f32 / steps as f32;
+        let x = (a.x as f32 + dx * t).round() as i32;
+        let y = (a.y as f32 + dy * t).round() as i32;
+        let z = (a.z as f32 + dz * t).round() as i32;
+        let p = Pos::new(x, y, z);
+        if p == a || p == b {
+            continue;
+        }
+        if voxel_world.is_solid(p) {
+            return true;
+        }
+    }
+    false
 }
 
 /// Convenience for scenarios: emit a scream from `entity`'s position.
