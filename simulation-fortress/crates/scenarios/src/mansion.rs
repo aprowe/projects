@@ -24,7 +24,9 @@
 use std::collections::HashSet;
 
 use fortress_engine::furniture::Container;
-use fortress_engine::line_of_sight_blocked;
+use fortress_engine::{
+    line_of_sight_blocked, Blemish, BlemishKind, Blemishes, Finish, Paint, Style,
+};
 
 use fortress_engine::actions::{fill_region_logged, note, spawn_creature};
 use fortress_engine::library::{FurnitureSpawnOpts, ItemSpawnOpts};
@@ -312,7 +314,12 @@ impl Scenario for MansionInvasion {
 
         // ─── doors ──────────────────────────────────────────────────
         let oak = ensure_material(world, "oak").expect("oak");
-        spawn_door(world, FRONT_DOOR, oak, "front door", DoorKind::Closed);
+        let front_door = spawn_door_returning(world, FRONT_DOOR, oak, "front door", DoorKind::Closed);
+        // The front door is painted glossy red.
+        world.entity_mut(front_door)
+            .insert(Paint::rgb(160, 30, 30))
+            .insert(Finish::Glossy)
+            .insert(Style::Victorian);
         spawn_door(world, DINING_DOOR, oak, "dining room door", DoorKind::Open);
         spawn_door(world, KITCHEN_DOOR, oak, "kitchen door", DoorKind::Open);
         spawn_door(world, PANTRY_DOOR, oak, "pantry door", DoorKind::Closed);
@@ -370,7 +377,18 @@ impl Scenario for MansionInvasion {
         }
         place(world, "china cabinet", Pos::new(4, 8, 0));
         place(world, "chandelier",    Pos::new(10, 13, 0));
-        place_painting(world, "abstract canvas", Pos::new(15, 8, 0));
+        let dining_painting = spawn_furniture_template(
+            world,
+            "abstract canvas",
+            FurnitureSpawnOpts { at: Pos::new(15, 8, 0), kind_label: None },
+        ).expect("abstract canvas");
+        // The dining painting has a small dent in the frame and a
+        // sun-faded patch in the upper corner.
+        world.entity_mut(dining_painting)
+            .insert(Blemishes(vec![
+                Blemish::new(BlemishKind::Dent, "in the gilded frame", 1),
+                Blemish::new(BlemishKind::SunFaded, "upper corner", 2),
+            ]));
 
         // ─── kitchen ────────────────────────────────────────────────
         place(world, "refrigerator",  Pos::new(4, 16, 0));
@@ -648,6 +666,10 @@ enum DoorKind {
 }
 
 fn spawn_door(world: &mut World, pos: Pos, mat: u16, label: &str, kind: DoorKind) {
+    let _ = spawn_door_returning(world, pos, mat, label, kind);
+}
+
+fn spawn_door_returning(world: &mut World, pos: Pos, mat: u16, label: &str, kind: DoorKind) -> Entity {
     let door = match kind {
         DoorKind::Open => {
             let mut d = Door::closed(mat, label);
@@ -657,7 +679,7 @@ fn spawn_door(world: &mut World, pos: Pos, mat: u16, label: &str, kind: DoorKind
         DoorKind::Closed => Door::closed(mat, label),
         DoorKind::Locked(dc) => Door::locked(mat, label, dc),
     };
-    world.spawn((Position(pos), Kind(label.into()), door));
+    world.spawn((Position(pos), Kind(label.into()), door)).id()
 }
 
 fn spawn_window(world: &mut World, pos: Pos, label: &str, closed: bool) {
@@ -995,17 +1017,24 @@ fn invader_planner(world: &mut World) {
         };
 
         // Step 3: pick from KNOWN loot we've seen with our own eyes.
-        // Filter to ones still on the floor (others got picked up).
-        let mut loot_candidates: Vec<(Entity, Pos)> = known_loot
+        // Filter to ones still on the floor; sort by Value descending
+        // (greedy burglar — grab the priciest first), then break ties
+        // by manhattan distance.
+        let mut loot_candidates: Vec<(Entity, Pos, u32, i32)> = known_loot
             .iter()
-            .filter_map(|&e| world.get::<Position>(e).map(|p| (e, p.0)))
+            .filter_map(|&e| {
+                let p = world.get::<Position>(e)?;
+                let v = world.get::<fortress_engine::Value>(e).map(|v| v.0).unwrap_or(0);
+                Some((e, p.0, v, pos.manhattan(p.0)))
+            })
             .collect();
-        loot_candidates.sort_by_key(|(_, vp)| pos.manhattan(*vp));
+        loot_candidates.sort_by(|a, b| b.2.cmp(&a.2).then(a.3.cmp(&b.3)));
         let target_loot: Option<(Entity, Pos)> = {
             let vw = world.resource::<VoxelWorld>();
             loot_candidates
                 .into_iter()
-                .find(|(_, vp)| find_path(vw, pos, *vp, 4096).is_some())
+                .find(|(_, vp, _, _)| find_path(vw, pos, *vp, 4096).is_some())
+                .map(|(e, p, _, _)| (e, p))
         };
 
         if let Some((item, item_pos)) = target_loot {

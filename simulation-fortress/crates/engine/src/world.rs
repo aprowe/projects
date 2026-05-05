@@ -60,6 +60,10 @@ pub struct Material {
     /// `decay_coatings`. Higher temperatures will scale this once
     /// ambient temperature is wired up.
     pub volatility: f32,
+    /// Display color (RGB, 0..=255). Used by colored renderers to
+    /// tint floor / wall glyphs to match the underlying material.
+    /// Default is a mid-grey.
+    pub color: [u8; 3],
 }
 
 impl Material {
@@ -72,6 +76,7 @@ impl Material {
             friction: 1.0,
             smell_intensity: 0.0,
             volatility: 0.0,
+            color: [16, 16, 16],
         }
     }
 }
@@ -262,6 +267,7 @@ mod tests {
             friction: 0.7,
             smell_intensity: 0.0,
             volatility: 0.0,
+            color: [120, 120, 120],
         })
     }
 

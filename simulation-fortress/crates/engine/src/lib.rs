@@ -9,6 +9,7 @@
 
 pub mod actions;
 pub mod anatomy;
+pub mod blemish;
 pub mod combat;
 pub mod components;
 pub mod dialog;
@@ -22,6 +23,7 @@ pub mod log;
 pub mod needs;
 pub mod pathfind;
 pub mod physics;
+pub mod quality;
 pub mod render;
 pub mod rng;
 pub mod scenario;
@@ -33,6 +35,9 @@ pub mod time;
 pub mod world;
 
 pub use actions::{fill_region_logged, note, set_voxel_logged, spawn_creature};
+pub use blemish::{
+    adjusted_value, describe_blemishes, Blemish, BlemishKind, Blemishes, Finish,
+};
 pub use anatomy::{
     anatomy_alive, apply_body_plan, default_functions, dragon_body_plan, function_capacity,
     humanoid_body_plan, quadruped_body_plan, spawn_humanoid_body, BodyPart, BodyPartKind,
@@ -71,6 +76,7 @@ pub use needs::{
     derive_mood, eat_on_use, fear_from_combat, tick_needs, Edible, Energy, Fear, Hunger, Mood,
 };
 pub use pathfind::find_path;
+pub use quality::{narrate_label, Paint, Quality, Style, Value};
 pub use render::{
     AsciiRenderer, CompositeRenderer, LogRenderer, NullRenderer, Renderer,
 };

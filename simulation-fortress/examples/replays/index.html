@@ -80,8 +80,8 @@ code { font-family: ui-monospace, SFMono-Regular, "SF Mono", monospace; backgrou
     <p>Tick 20: the AI spawns a zombie with a steel crowbar and queues an attack on alice. Workers' panic propagates through screams. Everyone flees.</p>
   </a>
   <a class="replay" href="mansion.html">
-    <h3>Mansion home invasion (60&times;45 — multi-tile furniture, search-based looting)</h3>
-    <p>A full estate: foyer, formal living, dining, kitchen, pantry, laundry, study, master suite (bed + bath + closet), kids' wing (twin bedroom + bath + playroom), guest room, family room, front porch, back deck with grill / hammock / pool / hot tub. Multi-tile furniture: 3-wide sofas, 2&times;3 king beds, 5&times;3 pool, 2&times;2 hot tub, 2&times;1 wardrobes / dressers / counters. Burglars discover loot through their own line of sight (no oracle): they can only target paintings &amp; items they have personally seen. Containers (wardrobes, dressers, safes) hide their contents until opened &mdash; on UseEntity, contents drop on the floor (after a strength check, if locked).</p>
+    <h3>Mansion home invasion (60&times;45 — colored, multi-tile, search-based loot)</h3>
+    <p>Now in color. Materials carry RGB: brick walls are red, marble foyer is white, hardwood is brown, carpet is red, grass is green, blood is dark red, glass is pale cyan. Each piece of furniture / item has Quality (Crude → Heirloom), Style (Modern, Victorian, Art Deco, …) and a base value; the Antique×Victorian premium is real, and Crude weapons take a damage penalty. Some items wear `Blemishes` (dent, burn mark, scratch, sun-faded patch, engraving, patina) that the narrator can read off; some wear a `Finish` (glossy, lacquered, distressed). The front door is painted glossy red via an explicit `Paint` override. Burglars now grab the priciest known loot first (sorted by Value descending). Same multi-tile furniture and search behavior as before.</p>
   </a>
   <a class="replay" href="airport.html">
     <h3>Airport infiltration (Hitman-style impersonation)</h3>

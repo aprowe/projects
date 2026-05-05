@@ -55,6 +55,7 @@ impl Scenario for Farming {
                 friction: 0.7,
                 smell_intensity: 0.05,
                 volatility: 0.0,
+                color: [120, 120, 120],
             });
             vw.register_material(Material {
                 name: "wheat".into(),
@@ -64,6 +65,7 @@ impl Scenario for Farming {
                 friction: 0.7,
                 smell_intensity: 0.0,
                 volatility: 0.0,
+                color: [120, 120, 120],
             });
             soil
         };

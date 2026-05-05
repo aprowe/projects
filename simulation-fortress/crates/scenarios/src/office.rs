@@ -62,6 +62,7 @@ impl Scenario for OfficeDrama {
                 friction: 0.85,
                 smell_intensity: 0.05,
                 volatility: 0.0,
+                color: [120, 120, 120],
             })
         };
         note(world, "Monday morning at the office.");

@@ -55,7 +55,7 @@ impl ReplayRenderer {
 
 impl Renderer for ReplayRenderer {
     fn frame(&mut self, world: &mut World, tick: Tick) {
-        let ascii = match self.inner.frame_to_string(world, tick) {
+        let ascii = match self.inner.frame_to_html(world, tick) {
             Some(s) => s,
             None => return,
         };
@@ -136,7 +136,7 @@ main {
   font-size: 14px;
   font-variant-numeric: tabular-nums;
 }
-pre.ascii {
+.ascii {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -144,11 +144,14 @@ pre.ascii {
   margin: 0;
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
   font-size: 14px;
-  line-height: 1.15;
-  white-space: pre;
+  line-height: 1.0;
   overflow-x: auto;
   color: var(--fg);
 }
+.ascii .meta { color: var(--muted); margin-bottom: 8px; }
+.ascii .map { font-size: 0; line-height: 0; }
+.ascii .row { font-size: 14px; line-height: 1.0; white-space: nowrap; }
+.ascii .row span { display: inline-block; width: 0.7em; }
 .narration {
   background: var(--panel);
   border: 1px solid var(--border);
@@ -217,7 +220,7 @@ pre.ascii {
 </header>
 <main>
   <div class="tickline" id="tickline">tick 0</div>
-  <pre class="ascii" id="ascii"></pre>
+  <div class="ascii" id="ascii"></div>
   <div class="narration" id="narration"></div>
   <div class="controls">
     <button id="prev" aria-label="previous tick">⏮</button>
@@ -257,7 +260,7 @@ function render() {
   const f = FRAMES[idx];
   if (!f) return;
   tickline.textContent = `tick ${f.tick}  (frame ${idx + 1}/${FRAMES.length})`;
-  asciiEl.textContent = f.ascii;
+  asciiEl.innerHTML = f.ascii;
   if (f.narration && f.narration.length > 0) {
     const ul = document.createElement("ul");
     f.narration.forEach(s => {

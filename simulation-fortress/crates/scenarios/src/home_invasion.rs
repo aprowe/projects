@@ -50,6 +50,7 @@ impl Scenario for HomeInvasion {
                 friction: 0.55,
                 smell_intensity: 0.05,
                 volatility: 0.0,
+                color: [120, 120, 120],
             });
             let grass = vw.register_material(Material {
                 name: "grass".into(),
@@ -59,6 +60,7 @@ impl Scenario for HomeInvasion {
                 friction: 0.8,
                 smell_intensity: 0.05,
                 volatility: 0.0,
+                color: [120, 120, 120],
             });
             (wood, grass)
         };

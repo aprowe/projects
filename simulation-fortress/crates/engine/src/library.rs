@@ -32,6 +32,7 @@ use crate::items::{
     ElectricalConductivity, Item, ItemMaterial, ItemName, Mass, Temperature, Texture,
     ThermalConductivity, Wearable,
 };
+use crate::quality::{Quality, Style, Value};
 use crate::sound::SoundKind;
 use crate::stats::Stats;
 use crate::tasks::{Goal, TaskQueue};
@@ -55,6 +56,15 @@ pub struct ItemTemplate {
     pub damage_dice: Option<DamageDice>,
     /// AC bonus when worn. None = no `ArmorBonus` component.
     pub armor_bonus: Option<i32>,
+    /// Craftsmanship tier. Scales combat bonus + value multiplier.
+    /// Defaults to `Quality::Standard` if `None`.
+    pub quality: Option<Quality>,
+    /// Aesthetic style. Mostly narrative, with an antique premium.
+    pub style: Option<Style>,
+    /// Currency value before quality/style multipliers. Final
+    /// `Value` is computed at spawn via `Value::from_template`.
+    /// 0 = worthless (everyday objects).
+    pub base_value: u32,
     pub description: String,
 }
 
@@ -97,6 +107,12 @@ pub struct FurnitureTemplate {
     pub painting: Option<PaintingSpec>,
     pub rug: Option<RugSpec>,
     pub light_lumens: Option<f32>,
+    /// Craftsmanship tier. Defaults to `Quality::Standard`.
+    pub quality: Option<Quality>,
+    /// Aesthetic style. `Standard` = no modifier in narration.
+    pub style: Option<Style>,
+    /// Currency value before quality/style multipliers (0 = trivial).
+    pub base_value: u32,
     pub description: String,
 }
 
@@ -354,11 +370,25 @@ pub fn spawn_item_template(
         if let Some(mat) = material_id {
             e.insert(ItemMaterial(mat));
         }
-        if let Some(dice) = template.damage_dice {
+        let quality = template.quality.unwrap_or(Quality::Standard);
+        let style = template.style.unwrap_or(Style::Standard);
+        if quality != Quality::Standard {
+            e.insert(quality);
+        }
+        if style != Style::Standard {
+            e.insert(style);
+        }
+        if template.base_value > 0 {
+            e.insert(Value::from_template(template.base_value, quality, style));
+        }
+        let combat_bonus = quality.combat_bonus();
+        if let Some(mut dice) = template.damage_dice {
+            // Quality flat-bonuses the dice (Crude -1, Masterwork +2, etc.)
+            dice.bonus = (dice.bonus as i32 + combat_bonus).max(-3) as i32;
             e.insert(dice);
         }
         if let Some(bonus) = template.armor_bonus {
-            e.insert(ArmorBonus(bonus));
+            e.insert(ArmorBonus((bonus + combat_bonus).max(0)));
         }
         if opts.equip_on.is_none() && opts.give_to.is_none() {
             if let Some(p) = opts.at {
@@ -578,6 +608,20 @@ pub fn spawn_furniture_template(
     if let Some(lumens) = template.light_lumens {
         world.entity_mut(id).insert(LightSource { lumens });
     }
+
+    let quality = template.quality.unwrap_or(Quality::Standard);
+    let style = template.style.unwrap_or(Style::Standard);
+    if quality != Quality::Standard {
+        world.entity_mut(id).insert(quality);
+    }
+    if style != Style::Standard {
+        world.entity_mut(id).insert(style);
+    }
+    if template.base_value > 0 {
+        world
+            .entity_mut(id)
+            .insert(Value::from_template(template.base_value, quality, style));
+    }
     Ok(id)
 }
 
@@ -598,7 +642,8 @@ fn populate_materials(lib: &mut Library) {
                flammable,
                friction,
                smell_intensity,
-               volatility|
+               volatility,
+               color: [u8; 3]|
      -> Material {
         Material {
             name: name.into(),
@@ -608,75 +653,76 @@ fn populate_materials(lib: &mut Library) {
             friction,
             smell_intensity,
             volatility,
+            color,
         }
     };
     let entries = [
         // structural — heavy
-        mat("wood",     true, 0.7, true,  0.55, 0.05, 0.0),
-        mat("oak",      true, 0.8, true,  0.60, 0.05, 0.0),
-        mat("hardwood", true, 0.8, true,  0.60, 0.04, 0.0),
-        mat("plywood",  true, 0.5, true,  0.55, 0.02, 0.0),
-        mat("pine",     true, 0.5, true,  0.55, 0.06, 0.0),
-        mat("stone",    true, 2.5, false, 0.70, 0.00, 0.0),
-        mat("granite",  true, 2.7, false, 0.55, 0.00, 0.0),
-        mat("marble",   true, 2.7, false, 0.45, 0.00, 0.0),
-        mat("brick",    true, 1.9, false, 0.65, 0.00, 0.0),
-        mat("concrete", true, 2.4, false, 0.70, 0.00, 0.0),
-        mat("drywall",  true, 0.7, true,  0.60, 0.00, 0.0),
-        mat("plaster",  true, 0.9, false, 0.60, 0.00, 0.0),
-        mat("steel",    true, 7.8, false, 0.50, 0.00, 0.0),
-        mat("iron",     true, 7.2, false, 0.50, 0.05, 0.0),
-        mat("aluminum", true, 2.7, false, 0.55, 0.00, 0.0),
-        mat("glass",    true, 2.5, false, 0.40, 0.00, 0.0),
+        mat("wood",     true, 0.7, true,  0.55, 0.05, 0.0,  [139,  90,  43]),
+        mat("oak",      true, 0.8, true,  0.60, 0.05, 0.0,  [115,  74,  18]),
+        mat("hardwood", true, 0.8, true,  0.60, 0.04, 0.0,  [120,  72,  36]),
+        mat("plywood",  true, 0.5, true,  0.55, 0.02, 0.0,  [200, 160, 100]),
+        mat("pine",     true, 0.5, true,  0.55, 0.06, 0.0,  [218, 170, 110]),
+        mat("stone",    true, 2.5, false, 0.70, 0.00, 0.0,  [120, 120, 120]),
+        mat("granite",  true, 2.7, false, 0.55, 0.00, 0.0,  [136, 124, 116]),
+        mat("marble",   true, 2.7, false, 0.45, 0.00, 0.0,  [232, 228, 222]),
+        mat("brick",    true, 1.9, false, 0.65, 0.00, 0.0,  [156,  74,  60]),
+        mat("concrete", true, 2.4, false, 0.70, 0.00, 0.0,  [165, 165, 158]),
+        mat("drywall",  true, 0.7, true,  0.60, 0.00, 0.0,  [228, 222, 210]),
+        mat("plaster",  true, 0.9, false, 0.60, 0.00, 0.0,  [232, 222, 200]),
+        mat("steel",    true, 7.8, false, 0.50, 0.00, 0.0,  [160, 160, 170]),
+        mat("iron",     true, 7.2, false, 0.50, 0.05, 0.0,  [ 96,  96, 100]),
+        mat("aluminum", true, 2.7, false, 0.55, 0.00, 0.0,  [200, 200, 205]),
+        mat("glass",    true, 2.5, false, 0.40, 0.00, 0.0,  [180, 220, 230]),
         // surfaces — floor coverings
-        mat("carpet",     false, 0.4, true, 0.85, 0.05, 0.0),
-        mat("tile",       true,  2.3, false, 0.45, 0.00, 0.0),
-        mat("linoleum",   false, 1.0, true,  0.55, 0.02, 0.0),
-        mat("hardwood_floor", true, 0.8, true, 0.55, 0.04, 0.0),
-        mat("wallpaper",  false, 0.2, true,  0.65, 0.00, 0.0),
-        mat("paint",      false, 0.1, true,  0.60, 0.05, 0.0),
+        mat("carpet",     false, 0.4, true, 0.85, 0.05, 0.0,  [160,  60,  60]),
+        mat("tile",       true,  2.3, false, 0.45, 0.00, 0.0,  [200, 200, 195]),
+        mat("linoleum",   false, 1.0, true,  0.55, 0.02, 0.0,  [200, 180, 130]),
+        mat("hardwood_floor", true, 0.8, true, 0.55, 0.04, 0.0, [150,  90,  40]),
+        mat("wallpaper",  false, 0.2, true,  0.65, 0.00, 0.0,  [220, 200, 175]),
+        mat("paint",      false, 0.1, true,  0.60, 0.05, 0.0,  [240, 240, 240]),
         // soft / wearable
-        mat("leather", false, 0.9, true, 0.85, 0.10, 0.0),
-        mat("rubber",  false, 1.2, true, 0.95, 0.05, 0.0),
-        mat("wool",    false, 0.3, true, 0.70, 0.05, 0.0),
-        mat("cotton",  false, 0.4, true, 0.70, 0.00, 0.0),
-        mat("silk",    false, 0.3, true, 0.50, 0.05, 0.0),
-        mat("velvet",  false, 0.4, true, 0.80, 0.05, 0.0),
-        mat("denim",   false, 0.5, true, 0.70, 0.05, 0.0),
+        mat("leather", false, 0.9, true, 0.85, 0.10, 0.0,  [110,  60,  30]),
+        mat("rubber",  false, 1.2, true, 0.95, 0.05, 0.0,  [ 30,  30,  30]),
+        mat("wool",    false, 0.3, true, 0.70, 0.05, 0.0,  [180, 170, 150]),
+        mat("cotton",  false, 0.4, true, 0.70, 0.00, 0.0,  [240, 240, 230]),
+        mat("silk",    false, 0.3, true, 0.50, 0.05, 0.0,  [240, 220, 200]),
+        mat("velvet",  false, 0.4, true, 0.80, 0.05, 0.0,  [120,  20,  60]),
+        mat("denim",   false, 0.5, true, 0.70, 0.05, 0.0,  [ 60, 100, 160]),
         // foam / fillings
-        mat("foam",      false, 0.1, true, 0.80, 0.00, 0.0),
-        mat("polyester", false, 0.4, true, 0.75, 0.00, 0.0),
+        mat("foam",      false, 0.1, true, 0.80, 0.00, 0.0,  [240, 230, 200]),
+        mat("polyester", false, 0.4, true, 0.75, 0.00, 0.0,  [200, 200, 200]),
         // ground / vegetation
-        mat("grass",  false, 0.1, true,  0.80, 0.05, 0.0),
-        mat("soil",   false, 1.5, false, 0.70, 0.05, 0.0),
-        mat("sand",   false, 1.6, false, 0.60, 0.00, 0.0),
-        mat("dirt",   false, 1.4, false, 0.75, 0.05, 0.0),
-        mat("gravel", false, 1.7, false, 0.75, 0.00, 0.0),
-        mat("asphalt", true, 2.3, false, 0.65, 0.05, 0.0),
+        mat("grass",  false, 0.1, true,  0.80, 0.05, 0.0,  [ 80, 140,  60]),
+        mat("soil",   false, 1.5, false, 0.70, 0.05, 0.0,  [ 90,  60,  40]),
+        mat("sand",   false, 1.6, false, 0.60, 0.00, 0.0,  [220, 200, 150]),
+        mat("dirt",   false, 1.4, false, 0.75, 0.05, 0.0,  [110,  78,  56]),
+        mat("gravel", false, 1.7, false, 0.75, 0.00, 0.0,  [140, 130, 120]),
+        mat("asphalt", true, 2.3, false, 0.65, 0.05, 0.0,  [ 50,  50,  55]),
         // fluids / coatings — volatility drives smell decay
-        mat("water",  false, 1.00, false, 0.40, 0.00, 0.40),
-        mat("oil",    false, 0.90, true,  0.05, 0.30, 0.05),
-        mat("blood",  false, 1.05, false, 0.25, 0.60, 0.10),
-        mat("ice",    true,  0.90, false, 0.10, 0.00, 0.20),
-        mat("mud",    false, 1.50, false, 0.50, 0.10, 0.05),
-        mat("urine",  false, 1.02, false, 0.30, 0.85, 0.20),
-        mat("vomit",  false, 1.00, false, 0.35, 0.70, 0.15),
-        mat("wine",   false, 0.99, true,  0.30, 0.40, 0.20),
+        mat("water",  false, 1.00, false, 0.40, 0.00, 0.40,  [ 80, 130, 200]),
+        mat("oil",    false, 0.90, true,  0.05, 0.30, 0.05,  [ 40,  35,  25]),
+        mat("blood",  false, 1.05, false, 0.25, 0.60, 0.10,  [160,  20,  20]),
+        mat("ice",    true,  0.90, false, 0.10, 0.00, 0.20,  [200, 230, 240]),
+        mat("mud",    false, 1.50, false, 0.50, 0.10, 0.05,  [ 90,  60,  30]),
+        mat("urine",  false, 1.02, false, 0.30, 0.85, 0.20,  [220, 200,  80]),
+        mat("vomit",  false, 1.00, false, 0.35, 0.70, 0.15,  [180, 150,  90]),
+        mat("wine",   false, 0.99, true,  0.30, 0.40, 0.20,  [120,  20,  30]),
         // food
-        mat("mashed_potato", false, 1.0, true, 0.30, 0.20, 0.10),
-        mat("ketchup",       false, 1.1, false, 0.35, 0.30, 0.05),
-        mat("oatmeal",       false, 0.9, true, 0.40, 0.15, 0.10),
-        mat("flour",         false, 0.5, true, 0.55, 0.10, 0.05),
-        mat("sugar",         false, 0.8, true, 0.45, 0.05, 0.05),
-        mat("coffee",        false, 0.8, true, 0.40, 0.50, 0.10),
+        mat("mashed_potato", false, 1.0, true, 0.30, 0.20, 0.10,  [240, 220, 170]),
+        mat("ketchup",       false, 1.1, false, 0.35, 0.30, 0.05,  [180,  30,  20]),
+        mat("oatmeal",       false, 0.9, true, 0.40, 0.15, 0.10,  [200, 180, 140]),
+        mat("flour",         false, 0.5, true, 0.55, 0.10, 0.05,  [240, 235, 220]),
+        mat("sugar",         false, 0.8, true, 0.45, 0.05, 0.05,  [250, 250, 250]),
+        mat("coffee",        false, 0.8, true, 0.40, 0.50, 0.10,  [ 80,  50,  30]),
         // canvas — for paintings
-        mat("canvas",  false, 0.4, true, 0.65, 0.00, 0.0),
-        mat("paper",   false, 0.3, true, 0.65, 0.00, 0.0),
+        mat("canvas",  false, 0.4, true, 0.65, 0.00, 0.0,  [220, 200, 170]),
+        mat("paper",   false, 0.3, true, 0.65, 0.00, 0.0,  [240, 235, 220]),
         // ceramics / plastics / misc
-        mat("porcelain", true,  2.4, false, 0.40, 0.00, 0.0),
-        mat("ceramic",   true,  2.0, false, 0.45, 0.00, 0.0),
-        mat("plastic",   false, 0.9, true,  0.55, 0.00, 0.0),
-        mat("wax",       false, 0.9, true,  0.50, 0.10, 0.05),
+        mat("porcelain", true,  2.4, false, 0.40, 0.00, 0.0,  [240, 240, 235]),
+        mat("ceramic",   true,  2.0, false, 0.45, 0.00, 0.0,  [220, 200, 175]),
+        mat("plastic",   false, 0.9, true,  0.55, 0.00, 0.0,  [200, 200, 200]),
+        mat("wax",       false, 0.9, true,  0.50, 0.10, 0.05,  [240, 230, 210]),
     ];
     for m in entries {
         lib.materials.insert(m.name.clone(), m);
@@ -709,6 +755,9 @@ fn populate_items(lib: &mut Library) {
             material: Some(material.into()),
             damage_dice: Some(dice),
             armor_bonus: None,
+            quality: None,
+            style: None,
+            base_value: 30,
             description: desc.into(),
         }
     }
@@ -731,6 +780,9 @@ fn populate_items(lib: &mut Library) {
             material: Some(material.into()),
             damage_dice: None,
             armor_bonus: if ac == 0 { None } else { Some(ac) },
+            quality: None,
+            style: None,
+            base_value: 20,
             description: desc.into(),
         }
     }
@@ -751,6 +803,9 @@ fn populate_items(lib: &mut Library) {
             material: material.map(|s| s.into()),
             damage_dice: None,
             armor_bonus: None,
+            quality: None,
+            style: None,
+            base_value: 0,
             description: desc.into(),
         }
     }
@@ -778,9 +833,14 @@ fn populate_items(lib: &mut Library) {
                 DamageDice::with_bonus(1, 6, 1),
                 "rough-cut bludgeon")),
         ("brass candlestick",
-            weapon(1.2, Texture::Polished, "iron",
-                DamageDice::new(1, 6),
-                "heavy ornamental candlestick — surprisingly nasty")),
+            ItemTemplate {
+                quality: Some(Quality::Antique),
+                style: Some(Style::Victorian),
+                base_value: 250,
+                ..weapon(1.2, Texture::Polished, "iron",
+                    DamageDice::new(1, 6),
+                    "heavy ornamental candlestick — surprisingly nasty")
+            }),
         ("fire poker",
             weapon(1.5, Texture::Polished, "iron",
                 DamageDice::with_bonus(1, 6, 1),
@@ -806,7 +866,14 @@ fn populate_items(lib: &mut Library) {
         ("cotton t-shirt",    clothing(0.2, Texture::Soft, Torso, "cotton", 0,  "light tee")),
         ("leather jacket",    clothing(1.2, Texture::Rough, Torso, "leather", 1,  "heavy outer layer, mild armor")),
         ("hoodie",            clothing(0.5, Texture::Soft, Torso, "cotton", 0,  "hooded sweatshirt")),
-        ("kevlar vest",       clothing(2.5, Texture::Rough, Torso, "leather", 3,  "ballistic vest — substantial AC bonus")),
+        ("kevlar vest",
+            ItemTemplate {
+                quality: Some(Quality::Fine),
+                style: Some(Style::Modern),
+                base_value: 400,
+                ..clothing(2.5, Texture::Rough, Torso, "leather", 3,
+                    "ballistic vest — substantial AC bonus")
+            }),
         ("leather boots",     clothing(0.9, Texture::Rough, Feet,  "leather", 0,  "ankle-high boots")),
         ("rubber boots",      clothing(0.9, Texture::Rough, Feet,  "rubber",  0,  "high-grip rubber boots")),
         ("hardhat",           clothing(0.4, Texture::Smooth, Head, "rubber",  1,  "construction safety helmet")),
@@ -881,6 +948,9 @@ fn populate_furniture(lib: &mut Library) {
             painting: None,
             rug: None,
             light_lumens: None,
+            quality: None,
+            style: None,
+            base_value: 0,
             description: desc.into(),
         }
     }
@@ -963,6 +1033,9 @@ fn populate_furniture(lib: &mut Library) {
         ("safe",
             FurnitureTemplate {
                 container: Some(ContainerSpec { locked: true, lock_dc: 22 }),
+                quality: Some(Quality::Fine),
+                style: Some(Style::Industrial),
+                base_value: 800,
                 ..base(Storage, 'S', "steel", "wall safe")
             }),
         ("filing cabinet",
@@ -1103,6 +1176,9 @@ fn populate_furniture(lib: &mut Library) {
                     title: "Portrait of Mrs. Vance".into(),
                     value: 4500,
                 }),
+                quality: Some(Quality::Antique),
+                style: Some(Style::Victorian),
+                base_value: 1500,
                 ..base(WallArt, 'P', "canvas", "oil portrait, gilded frame")
             }),
         ("abstract canvas",
@@ -1112,6 +1188,9 @@ fn populate_furniture(lib: &mut Library) {
                     title: "Red Sequence #4".into(),
                     value: 18000,
                 }),
+                quality: Some(Quality::Masterwork),
+                style: Some(Style::Modern),
+                base_value: 6000,
                 ..base(WallArt, 'P', "canvas", "modern abstract — bold reds")
             }),
         ("photograph",
