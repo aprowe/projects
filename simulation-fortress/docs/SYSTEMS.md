@@ -9,6 +9,9 @@ This document is intentionally informal. Each section captures: what the
 system is for, what exists today, and the open design questions we still
 need to answer. Edit freely.
 
+For the *workflow* of building a new scenario on top of these systems,
+see [`AUTHORING.md`](AUTHORING.md).
+
 ## Status legend
 
 - **done** — usable, exercised by at least one scenario
@@ -265,6 +268,68 @@ Open questions:
 - Decay over disuse?
 - Skill trees / prerequisites, or flat list?
 - Cross-scenario skill registry, or per-scenario.
+
+## 10b. Task system — planned
+
+Generic three-layer model for what an actor wants and is doing:
+
+- **Behavior** — the long-running role identity (Farmer, Soldier,
+  Zombie, Server). A marker component per role; the actor's
+  "profession" or "type".
+- **Goal** — current high-level intent, chosen by the behavior
+  given needs and perceptions ("eat", "kill nearest target",
+  "fulfill order #42"). One component on the actor; replaceable
+  when a higher-priority goal pre-empts.
+- **TaskQueue** — ordered low-level actions to satisfy the goal.
+  An executor system advances the head each tick; on completion
+  pops; on exhaustion the goal resolves (or fails).
+
+The reusable `Task` set covers ~80% of every scenario's needs:
+
+- `MoveTo(Pos)` — uses the existing pathfinder.
+- `Acquire(ItemKind)` — find-then-pickup convenience.
+- `PickUp(Entity)`, `Drop(Entity)`, `Equip(Entity)`.
+- `UseEntity(Entity)` — generic interaction (sit on chair,
+  operate stove, plow tile).
+- `Attack(Entity)`.
+- `Talk(Entity, Topic)`.
+- `Wait(Ticks)`.
+- `Build(Pos, Voxel)`.
+- `Eat(Entity)`, `Drink(Entity)`, `Sleep(Pos)`.
+
+Scenarios extend with custom variants when generic `UseEntity` isn't
+expressive enough (`Plow(tile)`, `ServeOrder(table, dish)`,
+`Infect(target)`).
+
+Likely shape:
+
+```rust
+#[derive(Component)]
+pub enum Goal { Idle, Kill(Entity), Tend(Entity), Patrol(Pos), ... }
+
+#[derive(Component, Default)]
+pub struct TaskQueue(pub VecDeque<Task>);
+
+pub enum Task { MoveTo(Pos), UseEntity(Entity), Attack(Entity), ... }
+```
+
+Plus events `TaskStarted` / `TaskCompleted` / `TaskFailed` flowing
+into the log so narration covers per-task actions for free.
+
+Open design choices:
+
+- **Plan generation**: GOAP-style planner (preconditions + effects)
+  vs. behavior-tree-style scripted plans. Start with scripted
+  per-behavior planners; promote to GOAP only if a scenario
+  demands it.
+- **Failure handling**: default to clearing the queue and
+  re-planning from the current goal; let scenarios override.
+- **Interruption priorities**: combat goals always preempt;
+  beyond that, scenarios decide.
+- **Action duration**: most tasks are instantaneous-on-arrival
+  (move and attack), but some (sleep, plow, cook) span many ticks
+  — the `Task` enum should carry per-variant progress where
+  needed.
 
 ## 11. Needs, drives & moods — planned
 
