@@ -13,6 +13,7 @@ pub mod combat;
 pub mod components;
 pub mod inject;
 pub mod items;
+pub mod library;
 pub mod log;
 pub mod needs;
 pub mod pathfind;
@@ -34,6 +35,10 @@ pub use anatomy::{
 };
 pub use combat::{resolve_attack, AttackResult};
 pub use inject::{apply_action, apply_json, Action};
+pub use library::{
+    ensure_material, spawn_item_template, spawn_role_template, ItemSpawnOpts, ItemTemplate,
+    Library, LibraryHit, RoleSpawnOpts, RoleTemplate,
+};
 pub use physics::{footing_check, Coating, Locomotion};
 pub use components::{ExtraData, Faction, Health, Kind, Position};
 pub use items::{

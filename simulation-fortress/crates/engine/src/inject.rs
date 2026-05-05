@@ -24,6 +24,10 @@ use crate::items::{
     equip_item as engine_equip, give_item, BodySlot, Item, ItemMaterial, ItemName, Mass,
     Temperature, Texture, Wearable,
 };
+use crate::library::{
+    ensure_material as library_ensure_material, spawn_item_template, spawn_role_template,
+    ItemSpawnOpts, Library, RoleSpawnOpts,
+};
 use crate::physics::Coating;
 use crate::tasks::{Goal, Task, TaskQueue};
 use crate::world::{MaterialId, Pos, Voxel, VoxelWorld};
@@ -100,6 +104,23 @@ pub enum Action {
     Equip { wearer: EntityRef, item: EntityRef },
     /// Give an item directly into a holder's inventory.
     Give { holder: EntityRef, item: EntityRef },
+    /// Spawn from a library template by name. The library is searched
+    /// for items first, then roles. Position is required for roles
+    /// and for floor-spawn items; for items being equipped/given,
+    /// position is optional.
+    Spawn {
+        template: String,
+        #[serde(default)]
+        at: Option<PosLike>,
+        #[serde(default)]
+        kind_label: Option<String>,
+        #[serde(default)]
+        faction: Option<String>,
+        #[serde(default)]
+        equip_on: Option<EntityRef>,
+        #[serde(default)]
+        give_to: Option<EntityRef>,
+    },
 }
 
 #[derive(Deserialize, Debug, Clone, Copy)]
@@ -391,6 +412,51 @@ pub fn apply_action(world: &mut World, action: &Action) -> Result<String, String
             give_item(world, h, i);
             Ok(format!("#{} given to #{}", i.index(), h.index()))
         }
+        Action::Spawn {
+            template,
+            at,
+            kind_label,
+            faction,
+            equip_on,
+            give_to,
+        } => {
+            let (in_items, in_roles) = {
+                let lib = world.resource::<Library>();
+                (lib.items.contains_key(template), lib.roles.contains_key(template))
+            };
+            if in_items {
+                let equip_on = match equip_on {
+                    Some(r) => Some(resolve_entity(world, r)?),
+                    None => None,
+                };
+                let give_to = match give_to {
+                    Some(r) => Some(resolve_entity(world, r)?),
+                    None => None,
+                };
+                let opts = ItemSpawnOpts {
+                    at: at.map(|p| p.to_pos()),
+                    equip_on,
+                    give_to,
+                    override_label: None,
+                };
+                let id = spawn_item_template(world, template, opts)?;
+                Ok(format!("spawned item '{}' (#{})", template, id.index()))
+            } else if in_roles {
+                let pos = at
+                    .ok_or_else(|| format!("role '{template}' requires `at` position"))?
+                    .to_pos();
+                let opts = RoleSpawnOpts {
+                    at: pos,
+                    kind_label: kind_label.clone(),
+                    faction_override: faction.clone(),
+                    health_override: None,
+                };
+                let id = spawn_role_template(world, template, opts)?;
+                Ok(format!("spawned role '{}' (#{})", template, id.index()))
+            } else {
+                Err(format!("no item or role template named '{template}'"))
+            }
+        }
     }
 }
 
@@ -405,11 +471,8 @@ fn build_task(world: &mut World, spec: &TaskSpec) -> Result<Task, String> {
     })
 }
 
-fn resolve_material(world: &World, name: &str) -> Result<MaterialId, String> {
-    world
-        .resource::<VoxelWorld>()
-        .material_id(name)
-        .ok_or_else(|| format!("unknown material: {name}"))
+fn resolve_material(world: &mut World, name: &str) -> Result<MaterialId, String> {
+    library_ensure_material(world, name)
 }
 
 fn resolve_entity(world: &mut World, eref: &EntityRef) -> Result<Entity, String> {

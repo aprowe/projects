@@ -2,6 +2,7 @@ use std::time::Duration;
 
 use bevy_ecs::prelude::{Schedule, World};
 
+use crate::library::Library;
 use crate::log::EventLog;
 use crate::render::{NullRenderer, Renderer};
 use crate::rng::Rng;
@@ -62,6 +63,7 @@ impl Simulation {
         world.insert_resource(VoxelWorld::new());
         world.insert_resource(Clock::default());
         world.insert_resource(EventLog::default());
+        world.insert_resource(Library::default());
         Self { world }
     }
 

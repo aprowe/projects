@@ -4,9 +4,9 @@ use std::time::Duration;
 
 use fortress_engine::{
     apply_json, function_capacity, AsciiRenderer, BodyPartKind, CompositeRenderer, Energy,
-    EventLog, Faction, Fear, Function, Health, Hunger, Item, ItemName, Kind, LogRenderer, Mood,
-    PartHealth, PartOf, PartStatus, Position, Pos, Renderer, RunOptions, Scenario, Simulation,
-    VoxelWorld, Wearing,
+    EventLog, Faction, Fear, Function, Health, Hunger, Item, ItemName, Kind, Library,
+    LogRenderer, Mood, PartHealth, PartOf, PartStatus, Position, Pos, Renderer, RunOptions,
+    Scenario, Simulation, VoxelWorld, Wearing,
 };
 
 mod farming;
@@ -148,6 +148,30 @@ fn drive<S: Scenario, R: Renderer>(
             }
             "q" | "quit" | "exit" => break,
             "help" | "?" => print_repl_help(),
+            "library" | "lib" => print_library_overview(sim.world.resource::<Library>()),
+            cmd if cmd.starts_with("library ") || cmd.starts_with("lib ") => {
+                let rest = cmd.split_once(' ').map(|p| p.1.trim()).unwrap_or("");
+                let lib = sim.world.resource::<Library>();
+                match rest {
+                    "materials" => list_library_category("materials", lib.list_materials()),
+                    "items" => list_library_category("items", lib.list_items()),
+                    "body_plans" | "plans" => {
+                        list_library_category("body plans", lib.list_body_plans())
+                    }
+                    "roles" => list_library_category("roles", lib.list_roles()),
+                    query => {
+                        let hits = lib.search(query);
+                        if hits.is_empty() {
+                            println!("no library entries match \"{query}\"");
+                        } else {
+                            println!("library hits for \"{query}\":");
+                            for hit in hits {
+                                println!("  [{}] {}", hit.category(), hit.name());
+                            }
+                        }
+                    }
+                }
+            }
             cmd if cmd.starts_with("go ") => {
                 if let Ok(n) = cmd[3..].trim().parse::<u64>() {
                     for _ in 0..n {
@@ -181,12 +205,30 @@ fn drive<S: Scenario, R: Renderer>(
 
 fn print_repl_help() {
     println!("commands:");
-    println!("  <enter>, step, s    advance one tick");
-    println!("  go N                advance N ticks");
-    println!("  <json>              inject one Action (or array) and stay on this tick");
-    println!("  q, quit, exit       end the simulation");
-    println!("  help, ?             show this help");
+    println!("  <enter>, step, s              advance one tick");
+    println!("  go N                          advance N ticks");
+    println!("  <json>                        inject one Action (or array) and stay");
+    println!("  library                       overview of all library categories");
+    println!("  library materials|items|...   list one category");
+    println!("  library <query>               search library by substring");
+    println!("  q, quit, exit                 end the simulation");
+    println!("  help, ?                       show this help");
     println!();
+}
+
+fn print_library_overview(lib: &Library) {
+    println!("library:");
+    for (name, count) in lib.category_names() {
+        println!("  {name:>12}: {count} entries");
+    }
+    println!("  use `library <category>` or `library <search query>` to explore.");
+}
+
+fn list_library_category(label: &str, names: Vec<&str>) {
+    println!("{label} ({}):", names.len());
+    for name in names {
+        println!("  {name}");
+    }
 }
 
 fn print_summary<S: Scenario>(scenario: &S, sim: &mut Simulation, tick: u64) {

@@ -513,6 +513,120 @@ Open questions:
   params: ...)`.
 - Composability: can a generator nest others?
 
+## 15b. Library — partial
+
+A discoverable catalog of reusable templates lives as a `Library`
+resource on the simulation world. Categories today:
+
+- **Materials** — `Material { name, solid, density, flammable,
+  friction }` keyed by name. ~22 entries: structural (wood, stone,
+  brick, steel, iron, glass), wearable (leather, rubber, wool,
+  cotton), ground (grass, soil, sand, dirt), fluids/coatings (water,
+  oil, blood, ice, mud), and a few foods (mashed potato, ketchup,
+  oatmeal — for the cafeteria food-fight scenario).
+- **Items** — `ItemTemplate` with mass, temperature, optional
+  thermal/electrical conductivity, texture, wearable slot, and a
+  reference to a library material. ~15 entries: weapons (steel
+  crowbar, kitchen knife, baseball bat, wooden club, brick),
+  throwable food, clothing (wool shirt, cotton t-shirt, leather
+  jacket, hoodie, leather/rubber boots, hardhat, backpack).
+- **Body plans** — humanoid, quadruped, dragon (data-driven
+  `BodyPlan` from §5).
+- **Roles** — `RoleTemplate` bundling kind label, body plan,
+  health, faction, and an equipment list. ~11 entries: civilian,
+  guard, thief, soldier, farmer, zombie, dog, dragon, plus
+  scenario-flavored ones (market_shopper, freshman, senior).
+
+API:
+
+- `Library::search("knife")` — substring match across all four
+  categories; returns `Vec<LibraryHit>`.
+- `Library::list_materials() / list_items() / list_body_plans() /
+  list_roles()` — sorted name lists.
+- `ensure_material(world, name)` — register a library material into
+  the active `VoxelWorld` if absent, return its id. Lets coatings
+  and other actions reference materials the scenario hadn't
+  pre-registered.
+- `spawn_item_template(world, name, opts)` — spawn an item entity
+  from a library template, optionally landing on the floor or going
+  straight onto a holder.
+- `spawn_role_template(world, name, opts)` — spawn a creature with
+  body plan + equipment from a role template.
+
+The `Action::Spawn { template, at, ... }` injection variant looks
+up the template name in the items map first, then roles. Combined
+with the library-fallback `resolve_material`, a REPL caller can do:
+
+```
+> tick 0: {"action":"Spawn","template":"thief","at":{"x":3,"y":-2}}
+ok: spawned role 'thief' (#99)
+> tick 0: {"action":"Coat","at":{"x":4,"y":1},"material":"oil"}
+ok: coated (4, 1, 0) with oil (vol 1)
+```
+
+…without home_invasion having pre-registered either oil or the
+thief role.
+
+REPL commands:
+
+```
+library                       overview of all categories
+library materials             list one category
+library leather               substring search across categories
+```
+
+Code: `crates/engine/src/library.rs`
+
+Open work:
+- Filling out item templates with the full physical-trait suite
+  (heat capacity, stickiness, smell, hardness, sharpness, …) once
+  the systems that use those traits exist.
+- Personalities catalog (Big-Five-ish trait bundles).
+- Scenarios catalog — pre-built scenario descriptors so
+  `fortress play <scenario>` becomes data, not Rust.
+- See §15c for the planned interactions library.
+
+## 15c. Interactions library — planned
+
+Material-on-material rules that the engine applies whenever the
+right combination shows up. Fire on gunpowder = explosion. Water
+on fire = extinguished + steam. Electricity on water = shock to
+anyone standing in it. Acid on metal = corrode. Salt on slug =
+dehydrate.
+
+Likely shape:
+
+```rust
+pub enum Interaction {
+    Adjacent { a: String, b: String, effect: InteractionEffect },
+    Apply    { source: String, target: String, effect: InteractionEffect },
+    HeatedAbove { material: String, threshold_c: f32, effect: InteractionEffect },
+}
+
+pub enum InteractionEffect {
+    TransformMaterial { from: String, to: String },
+    SpawnEntity { template: String, count: u32 },
+    Explosion { radius: i32, damage: i32 },
+    ApplyHazard { hazard: String, radius: i32 },
+    DamageNearby { radius: i32, amount: i32, damage_kind: DamageKind },
+}
+```
+
+A single engine system scans the world each tick (or on relevant
+events) for triggered interactions and applies their effects. The
+catalog itself sits next to the `Library` and is searchable the
+same way (`library interactions fire`).
+
+Open questions:
+
+- Per-tick scan vs. event-driven (e.g. only check fire+gunpowder
+  when a `Burning` coating spreads). Scan is simpler; events scale
+  better.
+- Composability: chains of interactions (water + electricity in
+  the same tile triggers a shock, but only while both present).
+- Authoring: hand-written for the canonical ones, or generative
+  (LLM produces "salt + slug → shrivel" on demand)?
+
 ## 16a. Runtime event injection — partial
 
 Anything that mutates the world from the outside — a REPL, a future
@@ -728,6 +842,29 @@ Scenarios are Rust code today. That's fine for the engine team, but
 we'll want a data-driven path for non-coders: TOML/JSON or a small
 scripting language. Trade-off is iteration speed vs. expressiveness.
 Defer until we know what real scenarios need.
+
+## Model scenarios
+
+A growing zoo of target scenarios that exercise the engine in
+different ways. Two are implemented (home invasion, farming); the
+rest are kept as design references — when a system is missing, we
+ask which model scenario surfaces it.
+
+| Scenario | What it stresses |
+|---|---|
+| **Home invasion** *(implemented)* | tile system, items + clothing, anatomy, combat, fear, retaliation, footing physics, RetaliateOnAttack, REPL injection demos |
+| **Farming** *(implemented)* | growth/stage components, scheduling, hunger + Eat goal, generic Edible interactions, claim/coordination between two farmers |
+| **D-Day landing** | ranged ballistics, cover & line of sight, squad/group hierarchy, morale + suppression, vehicles (landing craft) as containers, voxel destruction, Faction stance graph |
+| **Zombie invasion** | infection vector (status effect on death → conversion), sound propagation + horde flocking, barricading (voxel modification by actors), resource scarcity, day/night |
+| **Office drama** | conversations + dialogue, relationship graph, personality + mood, schedules (workday), gossip / information propagation, productivity tasks, status hierarchy |
+| **Restaurant sim** | recipes / crafting chain, money + economy, customer arrivals, patience timers, staff role markers (host / server / cook / dishwasher), order matching |
+| **Stealth thief in a crowded Indian market** | stealth + perception (sight cones, hearing radii), Locomotion::Sneaking made meaningful, crowd density, pickpocket from someone's Inventory, suspicion / alertness ramp, sound footprint of running vs. sneaking, narrow lane pathfinding under pressure |
+| **Seniors vs. freshmen — cafeteria food fight** | factions with relative status, items as projectiles (throw mass × texture vs. anatomy), splatter / Coating creation when food hits a wall (food becomes the slip hazard), morale snowball, group dynamics, low-lethality combat (bruises but not severs), authority figure (lunch monitor) suspicion timer |
+
+Each scenario is a forcing function. The thief surfaces stealth +
+perception + crowd density. The food fight surfaces throwing + on-
+hit Coating creation + low-lethality combat tuning + morale waves.
+We wire them up only when a system they need lands.
 
 ## How systems compose — example: home invasion
 
