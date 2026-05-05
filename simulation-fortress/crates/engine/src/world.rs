@@ -37,6 +37,12 @@ pub struct Material {
     pub solid: bool,
     pub density: f32,
     pub flammable: bool,
+    /// Coefficient of friction in `[0.0, 1.0+]`. 0.0 = frictionless
+    /// (oil, magma), ~0.15 = ice, 0.5 = polished stone, 0.6–0.7 =
+    /// most floors, ~0.9 = rough rubber sole. Used by
+    /// `physics::footing_check` to decide whether moving onto a tile
+    /// makes a creature slip.
+    pub friction: f32,
 }
 
 impl Material {
@@ -46,6 +52,7 @@ impl Material {
             solid: false,
             density: 0.0,
             flammable: false,
+            friction: 1.0,
         }
     }
 }
@@ -233,6 +240,7 @@ mod tests {
             solid: true,
             density: 2.5,
             flammable: false,
+            friction: 0.7,
         })
     }
 

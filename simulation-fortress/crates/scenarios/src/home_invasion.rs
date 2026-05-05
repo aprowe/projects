@@ -6,7 +6,7 @@
 use fortress_engine::actions::{fill_region_logged, note, spawn_creature};
 use fortress_engine::prelude::*;
 use fortress_engine::{
-    check_hazards, derive_mood, equip_item, execute_tasks, retaliation_system,
+    derive_mood, equip_item, execute_tasks, footing_check, retaliation_system,
     spawn_humanoid_body, tick_needs, BodySlot, Clock, ElectricalConductivity, Event, EventLog,
     Fear, Goal, Health, Item, ItemName, Kind, Mass, Material, Mood, Position, Pos,
     RetaliateOnAttack, Scenario, Task, TaskQueue, Temperature, Texture, ThermalConductivity,
@@ -47,12 +47,44 @@ impl Scenario for HomeInvasion {
                 solid: true,
                 density: 0.7,
                 flammable: true,
+                friction: 0.55,
             });
             let grass = vw.register_material(Material {
                 name: "grass".into(),
                 solid: false,
                 density: 0.1,
                 flammable: true,
+                friction: 0.8,
+            });
+            // Pre-register a few fluids/coatings the player can pour
+            // mid-run via the REPL: `{"action":"Coat","at":...,"material":"oil"}`.
+            vw.register_material(Material {
+                name: "oil".into(),
+                solid: false,
+                density: 0.9,
+                flammable: true,
+                friction: 0.05,
+            });
+            vw.register_material(Material {
+                name: "water".into(),
+                solid: false,
+                density: 1.0,
+                flammable: false,
+                friction: 0.4,
+            });
+            vw.register_material(Material {
+                name: "ice".into(),
+                solid: true,
+                density: 0.9,
+                flammable: false,
+                friction: 0.1,
+            });
+            vw.register_material(Material {
+                name: "blood".into(),
+                solid: false,
+                density: 1.05,
+                flammable: false,
+                friction: 0.25,
             });
             (wood, grass)
         };
@@ -141,7 +173,7 @@ impl Scenario for HomeInvasion {
                 intruder_planner,
                 doorway_announcer,
                 execute_tasks,
-                check_hazards,
+                footing_check,
                 retaliation_system,
                 frighten_attacked,
             )

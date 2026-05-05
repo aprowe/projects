@@ -247,7 +247,7 @@ pub fn narrate(event: &Event, world: &World) -> String {
             hazard,
             prone_ticks,
         } => format!(
-            "{} slips on the {} and crashes to the floor (prone for {} ticks).",
+            "{} slips on {} and goes down (prone for {} ticks).",
             label(*entity, world),
             hazard,
             prone_ticks,

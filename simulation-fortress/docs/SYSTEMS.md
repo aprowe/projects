@@ -584,32 +584,71 @@ Future moves:
 - Tick-scheduled injections: `--inject FILE` that runs actions at
   declared ticks, useful for replays and tests.
 
-## 16b. Hazards — partial
+## 16b. Tile-interaction physics — partial
 
-Environmental hazards are entities with `Position` + `Hazard`. The
-`check_hazards` system runs after `execute_tasks`, reads the tick's
-`EntityMoved` events, and applies a hazard whenever a creature
-steps onto its tile.
+Slipping isn't a special hazard kind anymore — it's a derived
+behavior of friction. Every `Material` carries a
+`friction: f32` (0.0 = oil/magma, ~0.15 = ice, 0.6 = wood floor,
+0.9 = rough rubber sole). A `Coating { material, volume }` component
+on a positioned entity means a layer of that material is sitting on
+the tile (puddle of oil, slick of blood, patch of ice). The
+`footing_check` engine system runs after `execute_tasks`, reads the
+tick's `EntityMoved` events, and computes:
 
-Today's only `Hazard` variant is `Slippery { slip_chance,
-prone_ticks, label }`: rolls against the seeded RNG, and on a hit
-shoves a `Task::Wait(prone_ticks)` to the front of the victim's
-queue and emits an `Event::Slipped`. The renderer was extended so
-non-creature entities (hazards, furniture) with `Position + Kind`
-appear on the ASCII map *only* if the scenario registers a glyph
-for that kind — voxels show through otherwise.
+```
+surface_friction  = min(coating_friction, floor_friction)
+footwear_friction = wearer's Wearing.Feet ItemMaterial.friction (or
+                    0.7 barefoot)
+balance           = function_capacity(Mobility) / 4 (clamped)
+loco_factor       = Locomotion::slip_factor()
+                    (Standing 0, Sneaking 0.5, Crawling 0.4,
+                     Walking 1.0, Running 1.8)
+effective         = surface_friction * footwear_friction * balance
+slip_prob         = (SAFE - effective) / SAFE * loco_factor
+                    where SAFE = 0.3
+```
 
-Code: `crates/engine/src/hazards.rs`
+If `slip_prob >= 0` after the loco multiplier, the system rolls the
+seeded RNG; on a slip it shoves `Task::Wait(prone_ticks)` to the
+front of the actor's queue and emits an `Event::Slipped` named
+after the slipperiest substance present. Standing actors skip the
+roll entirely.
 
-This is the engine's first piece of the broader **runtime event
-injection** story: external code (CLI, REPL, future LLM front-end)
-gets `&mut World` between ticks and can spawn hazards, push events
-into the log, mutate components — and existing systems pick it up
-on the next tick without any special "injection" plumbing.
+`Locomotion` is an optional component; with no explicit value the
+check infers from the head of the task queue: `Attack` → `Running`,
+`MoveTo` → `Walking`, `Wait` → `Standing`, default `Walking`.
 
-Future hazard kinds: `Burning`, `Poisonous`, `Electric`,
-`Suffocating`. Each one adds a variant to `Hazard` and a match arm
-to `apply_hazard`.
+Code: `crates/engine/src/physics.rs`
+
+**Demo via REPL** — pour oil at the doorway mid-run:
+
+```
+> tick 3: {"action":"Coat","at":{"x":4,"y":1,"z":0},"material":"oil"}
+ok: coated (4, 1, 0) with oil (vol 1)
+> tick 3: go 12
+[Tick 4] intruder#75 steps south to (4, 1, 0). intruder#75 slips on
+         oil on the floor and goes down (prone for 7 ticks).
+[Tick 5..11] (quiet — pursuing-at-Running × oil = 7 ticks recovery)
+[Tick 12] intruder#75 steps south to (4, 2, 0).
+```
+
+This is the canonical "make it generic" example: there is no
+`Slippery` hazard type. Oil, ice, blood, water, polished marble all
+slip the same way — they just have different `Material::friction`.
+Wearing rubber boots (high `ItemMaterial.friction`) helps. Wounded
+legs (lower `Function::Mobility` capacity) hurts. Sprinting hurts
+more. The system reads what's there.
+
+The non-creature renderer pass (entities with `Position + Kind` but
+no `Health` render only when their kind has a registered glyph) is
+what lets coatings show on the map without polluting the alive count.
+
+Future:
+- Volume depletion (oil dries, blood pools spread, ice melts).
+- Other tile interactions: stepping into fire (Burning material),
+  poison contact, conductive coating + electric current.
+- Material-driven combat damage modifiers (replace the inline
+  texture multipliers in `combat.rs` with `Material::sharpness`).
 
 ## 17. Events & logging — partial
 

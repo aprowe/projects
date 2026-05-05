@@ -139,6 +139,7 @@ mod tests {
             solid: true,
             density: 2.5,
             flammable: false,
+            friction: 0.7,
         })
     }
 

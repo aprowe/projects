@@ -55,12 +55,14 @@ impl Scenario for Farming {
                 solid: false,
                 density: 1.5,
                 flammable: false,
+                friction: 0.7,
             });
             vw.register_material(Material {
                 name: "wheat".into(),
                 solid: false,
                 density: 0.4,
                 flammable: true,
+                friction: 0.7,
             });
             soil
         };

@@ -20,11 +20,11 @@ use crate::anatomy::{
 };
 use crate::combat::resolve_attack;
 use crate::components::{Kind, Position};
-use crate::hazards::Hazard;
 use crate::items::{
     equip_item as engine_equip, give_item, BodySlot, Item, ItemMaterial, ItemName, Mass,
     Temperature, Texture, Wearable,
 };
+use crate::physics::Coating;
 use crate::tasks::{Goal, Task, TaskQueue};
 use crate::world::{MaterialId, Pos, Voxel, VoxelWorld};
 
@@ -76,8 +76,17 @@ pub enum Action {
         #[serde(default)]
         give_to: Option<EntityRef>,
     },
-    /// Spawn an environmental hazard at a tile.
-    SpawnHazard { at: PosLike, hazard: HazardSpec },
+    /// Coat a tile with the given material — a puddle, slick, blood
+    /// splatter, dust patch. The footing-check system reads the
+    /// material's `friction` to decide whether passing creatures
+    /// slip; flammability/conductivity are wired through whenever
+    /// those systems exist.
+    Coat {
+        at: PosLike,
+        material: String,
+        #[serde(default = "default_volume")]
+        volume: f32,
+    },
     /// Resolve a single attack: attacker swings their main-hand
     /// weapon (or fist) at target, picking a body part by hit weight.
     Attack {
@@ -204,41 +213,6 @@ impl BodySlotName {
 
 #[derive(Deserialize, Debug, Clone)]
 #[serde(tag = "type")]
-pub enum HazardSpec {
-    Slippery {
-        #[serde(default = "default_slip_chance")]
-        slip_chance: f32,
-        #[serde(default = "default_prone_ticks")]
-        prone_ticks: u32,
-        #[serde(default = "default_slippery_label")]
-        label: String,
-    },
-}
-
-impl HazardSpec {
-    fn hazard(self) -> Hazard {
-        match self {
-            HazardSpec::Slippery {
-                slip_chance,
-                prone_ticks,
-                label,
-            } => Hazard::Slippery {
-                slip_chance,
-                prone_ticks,
-                label,
-            },
-        }
-    }
-
-    fn label(&self) -> String {
-        match self {
-            HazardSpec::Slippery { label, .. } => label.clone(),
-        }
-    }
-}
-
-#[derive(Deserialize, Debug, Clone)]
-#[serde(tag = "type")]
 pub enum TaskSpec {
     MoveTo { at: PosLike },
     Attack { target: EntityRef },
@@ -260,14 +234,8 @@ fn default_temperature() -> f32 {
 fn default_body_plan() -> String {
     "humanoid".into()
 }
-fn default_slip_chance() -> f32 {
+fn default_volume() -> f32 {
     1.0
-}
-fn default_prone_ticks() -> u32 {
-    3
-}
-fn default_slippery_label() -> String {
-    "slippery patch".into()
 }
 
 /// Apply one action to the world. On success returns a short
@@ -364,17 +332,29 @@ pub fn apply_action(world: &mut World, action: &Action) -> Result<String, String
             }
             Ok(format!("spawned item {} (#{})", name, id.index()))
         }
-        Action::SpawnHazard { at, hazard } => {
-            let label = hazard.label();
-            let h = hazard.clone().hazard();
+        Action::Coat {
+            at,
+            material,
+            volume,
+        } => {
+            let mat = resolve_material(world, material)?;
+            let mat_name = world
+                .resource::<VoxelWorld>()
+                .material(mat)
+                .map(|m| m.name.clone())
+                .unwrap_or_else(|| material.clone());
+            let kind_label = format!("{mat_name}_spill");
             world.spawn((
                 Position(at.to_pos()),
-                Kind(label.clone()),
-                h,
+                Kind(kind_label.clone()),
+                Coating {
+                    material: mat,
+                    volume: *volume,
+                },
             ));
             Ok(format!(
-                "spawned {} hazard at ({}, {}, {})",
-                label, at.x, at.y, at.z
+                "coated ({}, {}, {}) with {} (vol {})",
+                at.x, at.y, at.z, mat_name, volume
             ))
         }
         Action::Attack { attacker, target } => {
