@@ -11,6 +11,7 @@ use fortress_engine::{
 
 mod farming;
 mod home_invasion;
+mod office;
 
 fn main() {
     let mut args = env::args().skip(1);
@@ -85,9 +86,21 @@ fn main() {
             print_summary(&scenario, &mut sim, t);
             t
         }
+        "office" => {
+            let mut scenario = office::OfficeDrama;
+            let log = LogRenderer::default();
+            let ascii = AsciiRenderer::new(Pos::new(0, 0, 0), Pos::new(11, 9, 0))
+                .at_z(0)
+                .frame_every(5)
+                .faction("office", 'o');
+            let mut renderer = CompositeRenderer(log, ascii);
+            let t = drive(&mut sim, &mut scenario, options, &mut renderer, repl);
+            print_summary(&scenario, &mut sim, t);
+            t
+        }
         other => {
             eprintln!("unknown scenario: {other}");
-            eprintln!("available: home_invasion, farming");
+            eprintln!("available: home_invasion, farming, office");
             std::process::exit(1);
         }
     };
