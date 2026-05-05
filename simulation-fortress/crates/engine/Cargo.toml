@@ -1,0 +1,11 @@
+[package]
+name = "fortress-engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Voxel-based simulation engine for Dwarf-Fortress-style scenarios"
+
+[lints]
+workspace = true
+
+[dependencies]

@@ -1,0 +1,16 @@
+[package]
+name = "fortress-scenarios"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Example scenarios driving the fortress-engine simulation core"
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "fortress"
+path = "src/main.rs"
+
+[dependencies]
+fortress-engine = { path = "../engine" }
