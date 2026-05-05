@@ -91,48 +91,43 @@ fn run_inner(
     }
     let mut current_idx = initial.unwrap_or(0);
     let mut show_menu = initial.is_none();
+    // If non-zero, fast-forward this many ticks after re-setup —
+    // used to implement rewind by replaying the deterministic sim.
+    let mut target_tick: u64 = 0;
+    let mut last_flash: Option<String> = None;
 
     loop {
-        // Build the scenario from its factory.
         let (mut scenario, ascii) = (entries[current_idx].factory)();
         let mut sim = Simulation::new();
-        let mut schedule = sim.prepare(scenario.as_mut(), fortress_engine::RunOptions::default());
+        let mut schedule =
+            sim.prepare(scenario.as_mut(), fortress_engine::RunOptions::default());
+        for _ in 0..target_tick {
+            sim.step(&mut schedule);
+        }
         let mut state = AppState::new(ascii);
         state.scenario_label = entries[current_idx].name.clone();
+        state.ticks = sim.current_tick();
+        if let Some(msg) = last_flash.take() {
+            state.flash(msg);
+        }
         if show_menu {
             state.mode = Mode::ScenarioMenu;
             state.picker = entries.iter().map(|e| e.name.clone()).collect();
             state.picker_idx = current_idx;
+            show_menu = false;
         }
-        match event_loop(terminal, &entries, &mut sim, &mut schedule, &mut scenario, &mut state)? {
+
+        match event_loop(
+            terminal, &entries, &mut sim, &mut schedule, &mut scenario, &mut state,
+        )? {
             LoopExit::Quit => return Ok(()),
             LoopExit::SwitchScenario(i) => {
                 current_idx = i;
-                show_menu = false;
+                target_tick = 0;
             }
-            LoopExit::Rewind(target_tick) => {
-                // Re-setup from tick 0 then step forward. We rebuild
-                // the scenario via the same factory.
-                let (mut s2, ascii2) = (entries[current_idx].factory)();
-                let mut sim2 = Simulation::new();
-                let mut sched2 =
-                    sim2.prepare(s2.as_mut(), fortress_engine::RunOptions::default());
-                for _ in 0..target_tick {
-                    sim2.step(&mut sched2);
-                }
-                // Drop the current sim and continue with the rewound one.
-                drop(scenario);
-                drop(schedule);
-                drop(sim);
-                let mut state2 = AppState::new(ascii2);
-                state2.scenario_label = entries[current_idx].name.clone();
-                state2.ticks = sim2.current_tick();
-                state2.flash(format!("rewound to tick {target_tick}"));
-                match event_loop(terminal, &entries, &mut sim2, &mut sched2, &mut s2, &mut state2)? {
-                    LoopExit::Quit => return Ok(()),
-                    LoopExit::SwitchScenario(i) => current_idx = i,
-                    LoopExit::Rewind(_) => {} // outer loop will handle
-                }
+            LoopExit::Rewind(t) => {
+                target_tick = t;
+                last_flash = Some(format!("rewound to tick {t}"));
             }
         }
     }
@@ -290,6 +285,16 @@ fn handle_key(
                 state.z += 1;
                 state.cursor.z = state.z;
                 state.ascii.z = state.z;
+            }
+            // Step forward 1 tick (alias for space).
+            KeyCode::Char('f') => {
+                sim.step(schedule);
+                state.ticks = sim.current_tick();
+            }
+            // Step backward 1 tick (rewinds via factory replay).
+            KeyCode::Char('b') => {
+                let target = state.ticks.saturating_sub(1);
+                return KeyOutcome::Rewind(target);
             }
             // Fast-forward 10 ticks
             KeyCode::Char('>') | KeyCode::Char('.') => {
@@ -869,7 +874,7 @@ fn draw_footer(f: &mut ratatui::Frame, area: Rect, state: &mut AppState) {
     let play = if state.auto_play { "▶ playing" } else { "⏸ paused" };
     let line = if let Some(m) = flash {
         format!(
-            "[{label}] {play}  {ms}ms  tick {tick}  z={z}  | {m}  | space step • p play • </> ±10 • r restart • m menu • g god • q quit",
+            "[{label}] {play}  {ms}ms  tick {tick}  z={z}  | {m}  | space/f step • b back1 • </> ±10 • r restart • p play • m menu • g god • q quit",
             label = state.scenario_label,
             ms = state.pace_ms,
             tick = state.ticks,
@@ -877,7 +882,7 @@ fn draw_footer(f: &mut ratatui::Frame, area: Rect, state: &mut AppState) {
         )
     } else {
         format!(
-            "[{label}] {play}  {ms}ms  tick {tick}  z={z}  | arrows cursor • click select • space step • p play • </> ±10 • r restart • [ ] z • +/- speed • m menu • g god • q quit",
+            "[{label}] {play}  {ms}ms  tick {tick}  z={z}  | arrows cursor • click select • space/f step • b back1 • </> ±10 • r restart • [ ] z • +/- speed • p play • m menu • g god • q quit",
             label = state.scenario_label,
             ms = state.pace_ms,
             tick = state.ticks,
