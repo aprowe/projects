@@ -9,15 +9,15 @@
 
 pub mod actions;
 pub mod anatomy;
-pub mod blemish;
+/// Combat resolution + dice rolls (grouped subfolder: combat/{mod,dice}).
 pub mod combat;
 pub mod components;
 pub mod dialog;
-pub mod dice;
 pub mod door;
 pub mod fire;
 pub mod furniture;
 pub mod inject;
+/// Items, blemishes, quality (grouped subfolder: items/{mod,blemish,quality}).
 pub mod items;
 pub mod library;
 pub mod log;
@@ -25,7 +25,6 @@ pub mod needs;
 pub mod npc_schedule;
 pub mod pathfind;
 pub mod physics;
-pub mod quality;
 pub mod render;
 pub mod rng;
 pub mod scenario;
@@ -36,6 +35,12 @@ pub mod status;
 pub mod tasks;
 pub mod time;
 pub mod world;
+
+// Backward-compat top-level paths so internal `use crate::dice::…`
+// and `use crate::blemish::…` etc. keep working after the move.
+pub use combat::dice;
+pub use items::blemish;
+pub use items::quality;
 
 pub use actions::{fill_region_logged, note, set_voxel_logged, spawn_creature};
 pub use blemish::{

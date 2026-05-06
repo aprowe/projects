@@ -9,6 +9,13 @@
 //! `Inventory(Vec<Entity>)` lists items being carried, `Wearing` maps
 //! body slots to the items currently equipped there. Helpers in this
 //! module keep the two views consistent and emit log events.
+//!
+//! Sibling modules:
+//! - `blemish`: dent / burn / scratch / engraving etc. on items.
+//! - `quality`: Quality / Style / Value / Paint craftsmanship axes.
+
+pub mod blemish;
+pub mod quality;
 
 use std::collections::HashMap;
 

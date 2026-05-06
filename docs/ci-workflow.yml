@@ -1,0 +1,83 @@
+name: Scenarios
+
+# Build, test, and run every scenario on every push. The
+# generated HTML replays are uploaded as a CI artifact so they're
+# easy to download and view from any commit.
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: short
+
+jobs:
+  build-test-scenarios:
+    name: build + test + run scenarios
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: simulation-fortress
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cargo cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: simulation-fortress
+
+      - name: Build (release)
+        run: cargo build --workspace --release
+
+      - name: Unit tests
+        run: cargo test --workspace --release
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -W clippy::all
+
+      - name: Run every scenario + generate replays
+        run: |
+          set -e
+          mkdir -p ../replay-artifacts
+          # If a scenario fails to complete in 250 ticks, we don't
+          # fail CI — we just record that it timed out. The point is
+          # to surface what shipped, not gate the build on dramatic
+          # outcomes.
+          for s in home_invasion farming office family_home mansion airport bank cabin cafeteria; do
+            echo "::group::scenario: $s"
+            cargo run --release --bin fortress -- "$s" --fast --ticks 250 \
+              --replay-html "../replay-artifacts/$s.html" \
+              | tee "../replay-artifacts/$s.log" \
+              || echo "scenario $s exited non-zero (continuing)"
+            echo "::endgroup::"
+          done
+          cp examples/replays/index.html ../replay-artifacts/index.html
+
+      - name: List replay sizes
+        run: |
+          ls -lh replay-artifacts/ || true
+        working-directory: ${{ github.workspace }}
+
+      - name: Upload replays
+        uses: actions/upload-artifact@v4
+        with:
+          name: scenario-replays-${{ github.sha }}
+          path: replay-artifacts/
+          retention-days: 14
+
+      - name: Upload run logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scenario-logs-${{ github.sha }}
+          path: replay-artifacts/*.log
+          retention-days: 7

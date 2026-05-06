@@ -10,17 +10,16 @@ use fortress_engine::{
 };
 use replay::ReplayRenderer;
 
-mod airport;
-mod bank;
-mod cabin;
-mod cafeteria;
-mod family_home;
-mod tui;
-mod farming;
-mod home_invasion;
-mod mansion;
-mod office;
 mod replay;
+mod scenarios;
+mod tui;
+
+// Bring the scenario types into scope under their old names so the
+// dispatch and TUI-factory code below reads the same. Each module
+// is now `scenarios::airport`, `scenarios::bank`, etc.
+use scenarios::{
+    airport, bank, cabin, cafeteria, family_home, farming, home_invasion, mansion, office,
+};
 
 fn main() {
     let mut args = env::args().skip(1);

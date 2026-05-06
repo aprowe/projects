@@ -13,6 +13,8 @@
 //! All randomness routes through the seeded `Rng` resource — runs
 //! are reproducible.
 
+pub mod dice;
+
 use bevy_ecs::prelude::{Entity, World};
 
 use crate::anatomy::{
