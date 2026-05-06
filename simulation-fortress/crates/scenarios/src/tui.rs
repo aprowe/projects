@@ -173,6 +173,10 @@ struct AppState {
     /// Active map overlay (tints the bg of each cell). Cycle with
     /// `o` (none → light → sound → temperature → none).
     overlay: OverlayMode,
+    /// Optional pinned location: when set, the inspector panel
+    /// stays focused on this tile even as the cursor roams. Toggle
+    /// with `i`. Click sets the pin to the clicked tile.
+    pin: Option<Pos>,
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug, Default)]
@@ -225,7 +229,14 @@ impl AppState {
             ticks: 0,
             scenario_label: String::new(),
             overlay: OverlayMode::None,
+            pin: None,
         }
+    }
+
+    /// Position the inspector panel reads from: pinned location if
+    /// set, otherwise the live cursor.
+    fn inspect_pos(&self) -> Pos {
+        self.pin.unwrap_or(self.cursor)
     }
 
     fn flash(&mut self, msg: impl Into<String>) {
@@ -344,6 +355,14 @@ fn handle_key(
             // Rewind to start
             KeyCode::Char('r') => {
                 return KeyOutcome::Rewind(0);
+            }
+            // Pin / unpin the inspector to the cursor's current tile.
+            KeyCode::Char('i') => {
+                state.pin = match state.pin {
+                    Some(_) => None,
+                    None => Some(state.cursor),
+                };
+                state.flash(if state.pin.is_some() { "pinned" } else { "unpinned" });
             }
             // Cycle overlays (none → light → sound → temperature)
             KeyCode::Char('o') => {
@@ -497,6 +516,8 @@ fn handle_mouse(m: event::MouseEvent, terminal: &mut Terminal<Backend>, state: &
     let local_y = (m.row - map_area.y) as i32;
     state.cursor.x = state.ascii.min.x + local_x;
     state.cursor.y = state.ascii.min.y + local_y;
+    // Click also pins the inspector to that tile.
+    state.pin = Some(state.cursor);
 }
 
 fn enter_picker(state: &mut AppState, mode: Mode, items: Vec<String>) {
@@ -908,7 +929,13 @@ fn contrast_for(bg: [u8; 3]) -> [u8; 3] {
 }
 
 fn draw_inspector(f: &mut ratatui::Frame, area: Rect, sim: &mut Simulation, state: &AppState) {
-    let block = Block::default().borders(Borders::ALL).title(" inspect ");
+    let pos = state.inspect_pos();
+    let title = if state.pin.is_some() {
+        format!(" inspect (pinned @ {},{},{}) ", pos.x, pos.y, pos.z)
+    } else {
+        " inspect ".to_string()
+    };
+    let block = Block::default().borders(Borders::ALL).title(title);
     let inner = block.inner(area);
     f.render_widget(block, area);
 
@@ -917,7 +944,7 @@ fn draw_inspector(f: &mut ratatui::Frame, area: Rect, sim: &mut Simulation, stat
     // Voxel info first.
     let (kind_label, mat_name) = {
         let vw = sim.world.resource::<VoxelWorld>();
-        let voxel = vw.voxel(state.cursor);
+        let voxel = vw.voxel(pos);
         let n = vw
             .material(voxel.material)
             .map(|m| m.name.clone())
@@ -926,16 +953,42 @@ fn draw_inspector(f: &mut ratatui::Frame, area: Rect, sim: &mut Simulation, stat
     };
     lines.push(Line::from(format!(
         "({}, {}, {})",
-        state.cursor.x, state.cursor.y, state.cursor.z
+        pos.x, pos.y, pos.z
     )));
     lines.push(Line::from(format!("voxel: {kind_label} ({mat_name})")));
+
+    // Coatings on this tile (puddles, blood, urine, etc.).
+    let coatings: Vec<(String, f32)> = {
+        let mut q = sim
+            .world
+            .query::<(&Position, &fortress_engine::Coating)>();
+        let vw = sim.world.resource::<VoxelWorld>();
+        let mut acc: Vec<(String, f32)> = Vec::new();
+        for (p, c) in q.iter(&sim.world) {
+            if p.0 != pos {
+                continue;
+            }
+            let name = vw
+                .material(c.material)
+                .map(|m| m.name.clone())
+                .unwrap_or_else(|| "?".into());
+            acc.push((name, c.volume));
+        }
+        acc
+    };
+    for (name, vol) in &coatings {
+        lines.push(Line::from(Span::styled(
+            format!("coating: {name} (vol {:.2})", vol),
+            TuiStyle::default().fg(Color::Rgb(180, 200, 230)),
+        )));
+    }
     lines.push(Line::from(""));
 
-    // Entities at cursor.
+    // Entities at the inspect position.
     let entities: Vec<Entity> = {
         let mut q = sim.world.query::<(Entity, &Position)>();
         q.iter(&sim.world)
-            .filter(|(_, p)| p.0 == state.cursor)
+            .filter(|(_, p)| p.0 == pos)
             .map(|(e, _)| e)
             .collect()
     };
@@ -943,6 +996,8 @@ fn draw_inspector(f: &mut ratatui::Frame, area: Rect, sim: &mut Simulation, stat
     if entities.is_empty() {
         lines.push(Line::from("(no entities)"));
     } else {
+        lines.push(Line::from(format!("entities ({}):", entities.len())));
+        lines.push(Line::from(""));
         for e in &entities {
             describe_entity(&mut lines, sim, *e);
             lines.push(Line::from(""));
@@ -1039,6 +1094,104 @@ fn describe_entity(lines: &mut Vec<Line>, sim: &mut Simulation, e: Entity) {
             lines.push(Line::from(format!("task: {}", t.label())));
         }
     }
+    use fortress_engine::{
+        Activity as SchedActivity, Disguise, Fear, Goal, Hunger, Identity, Knowledge, Mass,
+        Mood, Perceived, Schedule, Stats, StatusEffects,
+    };
+    if let Some(f) = world.get::<fortress_engine::Faction>(e) {
+        lines.push(Line::from(format!("faction: {}", f.0)));
+    }
+    if let Some(id) = world.get::<Identity>(e) {
+        lines.push(Line::from(format!(
+            "identity: {} ({}, {} clearance)",
+            id.name,
+            id.role,
+            id.clearance.label(),
+        )));
+    }
+    if let Some(d) = world.get::<Disguise>(e) {
+        lines.push(Line::from(Span::styled(
+            format!(
+                "disguise: {} ({} clearance, q={:.2})",
+                d.presented_name,
+                d.presented_clearance.label(),
+                d.quality,
+            ),
+            TuiStyle::default().fg(Color::Rgb(220, 200, 80)),
+        )));
+    }
+    if let Some(s) = world.get::<Stats>(e) {
+        lines.push(Line::from(format!(
+            "stats: STR {} DEX {} CON {} INT {} WIS {} CHA {}",
+            s.str_, s.dex, s.con, s.int, s.wis, s.cha,
+        )));
+    }
+    if let Some(m) = world.get::<Mass>(e) {
+        if m.0 > 0.0 {
+            lines.push(Line::from(format!("mass: {:.1} kg", m.0)));
+        }
+    }
+    if let Some(g) = world.get::<Goal>(e) {
+        lines.push(Line::from(format!("goal: {}", g.label())));
+    }
+    // Schedule: which entry is active right now?
+    if let Some(sched) = world.get::<Schedule>(e) {
+        if let Some(idx) = sched.active {
+            if let Some(entry) = sched.entries.get(idx) {
+                let act = match entry.activity {
+                    SchedActivity::Idle(_) => "idle",
+                    SchedActivity::WorkAt(_) => "work",
+                    SchedActivity::SleepAt(_) => "sleep",
+                    SchedActivity::Travel(_) => "travel",
+                };
+                lines.push(Line::from(format!(
+                    "schedule: {act} ({:02}:{:02}–{:02}:{:02})",
+                    entry.start_min / 60, entry.start_min % 60,
+                    entry.end_min / 60, entry.end_min % 60,
+                )));
+            }
+        } else {
+            lines.push(Line::from(format!(
+                "schedule: ({} entries, off-duty)",
+                sched.entries.len()
+            )));
+        }
+    }
+    // Mood / Fear / Hunger summary line.
+    let mut needs: Vec<String> = Vec::new();
+    if let Some(m) = world.get::<Mood>(e) { needs.push(format!("mood {:.1} ({})", m.current, m.label())); }
+    if let Some(f) = world.get::<Fear>(e) { needs.push(format!("fear {:.2}", f.current)); }
+    if let Some(h) = world.get::<Hunger>(e) { needs.push(format!("hunger {:.2}", h.current)); }
+    if !needs.is_empty() {
+        lines.push(Line::from(format!("needs: {}", needs.join("  "))));
+    }
+    // Active status effects.
+    if let Some(se) = world.get::<StatusEffects>(e) {
+        if !se.0.is_empty() {
+            let labels: Vec<String> = se.0.iter()
+                .map(|x| format!("{}({}t)", x.kind.label(), x.remaining))
+                .collect();
+            lines.push(Line::from(Span::styled(
+                format!("status: {}", labels.join(", ")),
+                TuiStyle::default().fg(Color::Rgb(240, 100, 80)),
+            )));
+        }
+    }
+    // Perception summary.
+    if let Some(p) = world.get::<Perceived>(e) {
+        let mut bits: Vec<String> = Vec::new();
+        if !p.seen.is_empty() { bits.push(format!("sees {}", p.seen.len())); }
+        if !p.heard.is_empty() { bits.push(format!("hears {}", p.heard.len())); }
+        if !p.smelled.is_empty() { bits.push(format!("smells {}", p.smelled.len())); }
+        if !bits.is_empty() {
+            lines.push(Line::from(format!("perceives: {}", bits.join(", "))));
+        }
+    }
+    if let Some(k) = world.get::<Knowledge>(e) {
+        if !k.0.is_empty() {
+            lines.push(Line::from(format!("knowledge: {} facts", k.0.len())));
+        }
+    }
     // Wounds: list any non-Intact body parts on this entity.
     let mut parts: Vec<(&'static str, &'static str, i32, i32)> = {
         let mut q = world.query::<(&PartOf, &BodyPartKind, &PartHealth)>();
@@ -1070,7 +1223,7 @@ fn draw_footer(f: &mut ratatui::Frame, area: Rect, state: &mut AppState) {
     let play = if state.auto_play { "▶ playing" } else { "⏸ paused" };
     let line = if let Some(m) = flash {
         format!(
-            "[{label}] {play}  {ms}ms  tick {tick}  z={z}  | {m}  | space/f step • b back1 • </> ±10 • r restart • p play • m menu • g god • o overlay • q quit",
+            "[{label}] {play}  {ms}ms  tick {tick}  z={z}  | {m}  | space/f step • b back1 • </> ±10 • r restart • p play • i pin • m menu • g god • o overlay • q quit",
             label = state.scenario_label,
             ms = state.pace_ms,
             tick = state.ticks,
@@ -1078,7 +1231,7 @@ fn draw_footer(f: &mut ratatui::Frame, area: Rect, state: &mut AppState) {
         )
     } else {
         format!(
-            "[{label}] {play}  {ms}ms  tick {tick}  z={z}  | arrows cursor • click select • space/f step • b back1 • </> ±10 • r restart • [ ] z • +/- speed • p play • m menu • g god • o overlay • q quit",
+            "[{label}] {play}  {ms}ms  tick {tick}  z={z}  | arrows cursor • click select • space/f step • b back1 • </> ±10 • r restart • [ ] z • +/- speed • p play • i pin • m menu • g god • o overlay • q quit",
             label = state.scenario_label,
             ms = state.pace_ms,
             tick = state.ticks,

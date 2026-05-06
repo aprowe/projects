@@ -13,6 +13,7 @@ use replay::ReplayRenderer;
 mod airport;
 mod bank;
 mod cabin;
+mod cafeteria;
 mod family_home;
 mod tui;
 mod farming;
@@ -260,9 +261,19 @@ fn main() {
                 replay_html_path.clone(), "retired killer's cabin",
             )
         }
+        "cafeteria" => {
+            let mut scenario = cafeteria::Cafeteria;
+            let ascii = AsciiRenderer::new(Pos::new(0, 0, 0), Pos::new(30, 17, 0))
+                .at_z(0).frame_every(1)
+                .faction("staff", 's').faction("freshman", 'f').faction("senior", 'S');
+            run_with_optional_replay(
+                &mut sim, &mut scenario, options, ascii, repl,
+                replay_html_path.clone(), "cafeteria food fight",
+            )
+        }
         other => {
             eprintln!("unknown scenario: {other}");
-            eprintln!("available: home_invasion, farming, office, family_home, mansion, airport, bank, cabin");
+            eprintln!("available: home_invasion, farming, office, family_home, mansion, airport, bank, cabin, cafeteria");
             std::process::exit(1);
         }
     };
@@ -374,6 +385,13 @@ fn build_scenario_entries() -> Vec<tui::ScenarioEntry> {
                 ("redwood tree", 'T'), ("bush", '&'), ("rock", '*'),
                 ("camp fire", '*'), ("fireplace", '*'),
             ] { ascii = ascii.entity_kind(k, g); }
+            (Box::new(s), ascii)
+        })),
+        entry("cafeteria", Box::new(|| {
+            let s = cafeteria::Cafeteria;
+            let ascii = AsciiRenderer::new(Pos::new(0, 0, 0), Pos::new(30, 17, 0))
+                .at_z(0).frame_every(1)
+                .faction("staff", 's').faction("freshman", 'f').faction("senior", 'S');
             (Box::new(s), ascii)
         })),
     ]
