@@ -26,13 +26,15 @@ use fortress_engine::actions::{fill_region_logged, note, spawn_creature};
 use fortress_engine::library::{FurnitureSpawnOpts, ItemSpawnOpts};
 use fortress_engine::prelude::*;
 use fortress_engine::{
-    decay_coatings, derive_mood, door_voxel_sync, emit_combat_sounds, emit_movement_sounds,
-    ensure_material, execute_tasks, fear_from_combat, footing_check, furniture_emit_system,
-    retaliation_system, spawn_furniture_template, spawn_humanoid_body, spawn_item_template,
-    tick_carrying, tick_needs, tick_schedules, tick_status_effects, update_hearing,
-    update_sight, update_smell, Activity as Act, Clock, Event, EventLog, Fear, Goal, Health,
-    Hearing, Inventory, Kind, Locomotion, Mood, Perceived, Position, Pos, RetaliateOnAttack,
-    Schedule, ScheduleEntry, Scenario, Sight, Stats, Task, TaskQueue, Voxel, VoxelWorld,
+    decay_coatings, derive_mood, door_voxel_sync, drive_planner, emit_combat_sounds,
+    emit_movement_sounds, ensure_material, execute_tasks, fear_from_combat, footing_check,
+    furniture_emit_system, retaliation_system, spawn_furniture_template, spawn_humanoid_body,
+    spawn_item_template, tick_carrying, tick_needs, tick_schedules, tick_status_effects,
+    update_hearing, update_sight, update_smell, Activity as Act, BreakUpFight, CleanSpills,
+    Clock, Drives, Event, EventLog, ExitUnfamiliar, Fear, FleeFromViolence, Goal,
+    Hearing, Idle, Inventory, Kind, Messiness, Mood, Perceived,
+    Position, Pos, RetaliateOnAttack, Schedule, ScheduleEntry, Scenario, Sight,
+    Stats, Task, TaskQueue, Voxel, VoxelWorld, WinFoodFight,
 };
 
 const X_MIN: i32 = 1;
@@ -124,11 +126,22 @@ impl Scenario for Cafeteria {
         let chef = humanoid(world, "chef", Pos::new(3, 5, 0), "staff", 80,
             Stats { str_: 12, dex: 13, con: 13, int: 12, wis: 13, cha: 12 });
         equip(world, chef, &["uniform shirt", "rubber boots", "kitchen knife"]);
-        world.entity_mut(chef).insert(Worker)
+        world.entity_mut(chef).insert(Worker).insert(Messiness::default())
             .insert(Schedule::new(vec![
                 ScheduleEntry::new(6 * 60, 13 * 60 + 30, Act::WorkAt(Pos::new(3, 5, 0))),
                 ScheduleEntry::new(13 * 60 + 30, 14 * 60, Act::Travel(ENTRANCE)),
-            ]));
+            ]))
+            // Chef wants to keep the kitchen clean & break up trouble
+            // that strays into it; flees if it gets too crazy.
+            .insert(Drives::new()
+                .with(Box::new(BreakUpFight {
+                    range: 6,
+                    jurisdiction: Some((Pos::new(X_MIN, Y_MIN, 0),
+                                        Pos::new(KITCHEN_X_MAX, Y_MAX, 0))),
+                }))
+                .with(Box::new(CleanSpills { range: 5 }))
+                .with(Box::new(FleeFromViolence { flee_to: ENTRANCE }))
+                .with(Box::new(Idle)));
 
         // Two lunch ladies on the serving line.
         for (i, x) in [11, 13].iter().enumerate() {
@@ -139,23 +152,35 @@ impl Scenario for Cafeteria {
             // Hand each one a serving ladle (kitchen knife mass; harmless).
             let _ = spawn_item_template(world, "frying pan",
                 ItemSpawnOpts { equip_on: Some(lady), ..Default::default() });
-            world.entity_mut(lady).insert(Worker)
+            world.entity_mut(lady).insert(Worker).insert(Messiness::default())
                 .insert(Schedule::new(vec![
                     ScheduleEntry::new(11 * 60, 13 * 60 + 30, Act::WorkAt(line_pos)),
                     ScheduleEntry::new(13 * 60 + 30, 14 * 60, Act::Travel(ENTRANCE)),
-                ]));
+                ]))
+                // Lunch ladies clean spills, break up fights at the
+                // line, flee if it gets violent.
+                .insert(Drives::new()
+                    .with(Box::new(CleanSpills { range: 6 }))
+                    .with(Box::new(BreakUpFight { range: 5, jurisdiction: None }))
+                    .with(Box::new(FleeFromViolence { flee_to: ENTRANCE }))
+                    .with(Box::new(Idle)));
         }
 
         // Custodian: mops dining 11:00-12:00, returns 13:00-14:00.
         let cust = humanoid(world, "custodian", Pos::new(20, 14, 0), "staff", 60,
             Stats::citizen());
         equip(world, cust, &["uniform shirt", "rubber boots"]);
-        world.entity_mut(cust).insert(Worker)
+        world.entity_mut(cust).insert(Worker).insert(Messiness::default())
             .insert(Schedule::new(vec![
                 ScheduleEntry::new(11 * 60, 12 * 60, Act::WorkAt(Pos::new(25, 14, 0))),
                 ScheduleEntry::new(12 * 60, 13 * 60, Act::Idle(ENTRANCE)),
                 ScheduleEntry::new(13 * 60, 14 * 60, Act::WorkAt(Pos::new(18, 14, 0))),
-            ]));
+            ]))
+            // Custodian: cleans relentlessly, has no stomach for fighting.
+            .insert(Drives::new()
+                .with(Box::new(FleeFromViolence { flee_to: ENTRANCE }))
+                .with(Box::new(CleanSpills { range: 8 }))
+                .with(Box::new(Idle)));
 
         // ─── Students ──────────────────────────────────────────────
         // Freshmen come in at 11:30, eat at tables, leave 12:30.
@@ -172,10 +197,21 @@ impl Scenario for Cafeteria {
             let _ = spawn_item_template(world, "plate of mashed potato",
                 ItemSpawnOpts { give_to: Some(f), ..Default::default() });
             world.entity_mut(f).insert(Student).insert(RetaliateOnAttack)
+                .insert(Messiness::default())
                 .insert(Schedule::new(vec![
                     ScheduleEntry::new(11 * 60 + 30, 12 * 60 + 30, Act::Idle(seat)),
                     ScheduleEntry::new(12 * 60 + 30, 13 * 60, Act::Travel(ENTRANCE)),
-                ]));
+                ]))
+                // Freshman: throw food at seniors when chaos starts;
+                // flee if it gets out of hand; head for the door
+                // when bored.
+                .insert(Drives::new()
+                    .with(Box::new(FleeFromViolence { flee_to: ENTRANCE }))
+                    .with(Box::new(WinFoodFight {
+                        rival_factions: vec!["senior".into(), "freshman".into()],
+                    }))
+                    .with(Box::new(ExitUnfamiliar { exit_hint: ENTRANCE }))
+                    .with(Box::new(Idle)));
             // Mark the first as the instigator.
             if i == 0 {
                 world.entity_mut(f).insert(InstigatorTag);
@@ -191,10 +227,20 @@ impl Scenario for Cafeteria {
             let _ = spawn_item_template(world, "bottle of ketchup",
                 ItemSpawnOpts { give_to: Some(s), ..Default::default() });
             world.entity_mut(s).insert(Student).insert(RetaliateOnAttack)
+                .insert(Messiness::default())
                 .insert(Schedule::new(vec![
                     ScheduleEntry::new(11 * 60 + 50, 12 * 60 + 50, Act::Idle(seat)),
                     ScheduleEntry::new(12 * 60 + 50, 13 * 60 + 20, Act::Travel(ENTRANCE)),
-                ]));
+                ]))
+                // Senior: same drives as freshmen but treats both
+                // factions as rivals (food fights are tribal).
+                .insert(Drives::new()
+                    .with(Box::new(FleeFromViolence { flee_to: ENTRANCE }))
+                    .with(Box::new(WinFoodFight {
+                        rival_factions: vec!["freshman".into(), "senior".into()],
+                    }))
+                    .with(Box::new(ExitUnfamiliar { exit_hint: ENTRANCE }))
+                    .with(Box::new(Idle)));
         }
 
         note(world, "Bell rings. The herd thunders down the hall.");
@@ -205,9 +251,11 @@ impl Scenario for Cafeteria {
         s.add_systems((
             tick_needs, derive_mood, door_voxel_sync,
             tick_schedules,
-            food_fight_planner,
+            instigator_kicks_off,    // single-shot: instigator throws at 12:15
+            drive_planner,           // utility-AI runs every actor's drives
             execute_tasks,
             tick_carrying,
+            apply_throw_messiness,   // post-impact: convert throws → Messiness
             handle_door_use,
         ).chain());
         s.add_systems((
@@ -215,15 +263,32 @@ impl Scenario for Cafeteria {
             update_sight, update_hearing, update_smell,
             tick_status_effects, footing_check, retaliation_system,
             fear_from_combat, decay_coatings,
+            decay_messiness,
         ).chain().after(handle_door_use));
         s
     }
 
     fn is_complete(&self, world: &mut World) -> bool {
-        // Done after 60 sim ticks (1 sim hour) once auto-fight starts,
-        // or when no students remain in the cafeteria.
         let now = world.resource::<Clock>().minute_of_day();
-        now > 13 * 60
+        if now <= 13 * 60 { return false; }
+        // Bell rings — score the food fight by Messiness. Lowest
+        // total wins the period; highest is the public laughingstock.
+        type Row = (String, f32);
+        let mut scores: Vec<Row> = {
+            let mut q = world.query_filtered::<(&Kind, &Messiness), With<Student>>();
+            q.iter(world).map(|(k, m)| (k.0.clone(), m.0)).collect()
+        };
+        if !scores.is_empty() {
+            scores.sort_by(|a, b| a.1.total_cmp(&b.1));
+            let cleanest = &scores[0];
+            let messiest = scores.last().unwrap();
+            let tick = world.resource::<Clock>().tick;
+            world.resource_mut::<EventLog>().push(tick, Event::Note(format!(
+                "The bell rings. The cafeteria is wreckage. {} walks out clean (mess {:.2}). {} is unrecognizable under condiment ({:.2}).",
+                cleanest.0, cleanest.1, messiest.0, messiest.1,
+            )));
+        }
+        true
     }
 }
 
@@ -260,79 +325,96 @@ fn equip(world: &mut World, who: Entity, items: &[&str]) {
     }
 }
 
-// ─── per-tick: the food fight planner ─────────────────────────────
+// ─── single-shot: the instigator launches the fight ───────────────
+// Most cafeteria behavior emerges from the engine's `drive_planner`
+// running each actor's `WinFoodFight` / `BreakUpFight` / etc. drives.
+// But the very FIRST throw needs a kick — without it, no chaos has
+// occurred yet, so the WinFoodFight drives all score zero (the
+// "sees rivals throwing" + recent-violence inputs are flat).
+//
+// At 12:15 we manually push a Throw task on the InstigatorTag
+// freshman; once that lands and Messiness starts spreading, the
+// drives pick up and the simulation runs itself.
 
-fn food_fight_planner(world: &mut World) {
+fn instigator_kicks_off(world: &mut World) {
     let now = world.resource::<Clock>().minute_of_day();
+    if now != 12 * 60 + 15 { return; }
+    let instigator: Option<(Entity, Pos)> = {
+        let mut q = world.query_filtered::<(Entity, &Position), With<InstigatorTag>>();
+        q.iter(world).next().map(|(e, p)| (e, p.0))
+    };
+    let Some((inst, ipos)) = instigator else { return };
+    // Pick the closest senior across the room.
+    let target_pos: Option<Pos> = {
+        let mut q = world.query_filtered::<(&Kind, &Position), With<Student>>();
+        q.iter(world)
+            .filter(|(k, _)| k.0.starts_with("senior_"))
+            .map(|(_, p)| p.0)
+            .min_by_key(|p| p.manhattan(ipos))
+    };
+    let tray: Option<Entity> = world.get::<Inventory>(inst)
+        .and_then(|inv| inv.0.iter().copied().next());
+    if let (Some(tray), Some(tpos)) = (tray, target_pos) {
+        if let Some(mut q) = world.get_mut::<TaskQueue>(inst) {
+            q.clear();
+            q.push(Task::Throw(tray, tpos));
+        }
+        let tick = world.resource::<Clock>().tick;
+        world.resource_mut::<EventLog>().push(tick, Event::Note(
+            "A freshman stands up on the table and hurls a plate of mashed potato across the cafeteria.".into()
+        ));
+    }
+    // Mark the instigator so we don't re-fire next tick.
+    world.entity_mut(inst).remove::<InstigatorTag>();
+}
+
+// ─── post-throw: score Messiness on whoever got hit ───────────────
+//
+// The engine's `Task::Throw` already drops the projectile at the
+// landing tile and emits an `EntityAttacked` event with mass-based
+// HP damage. We piggyback on that event here: any creature attacked
+// by a thrown food item picks up Messiness equal to the food's
+// vividness factor (smell_intensity + 0.5).
+
+fn apply_throw_messiness(world: &mut World) {
     let tick = world.resource::<Clock>().tick;
-    // 12:15: the instigator throws their tray at the closest senior.
-    if now == 12 * 60 + 15 {
-        let instigator: Option<(Entity, Pos)> = {
-            let mut q = world
-                .query_filtered::<(Entity, &Position), With<InstigatorTag>>();
-            q.iter(world).next().map(|(e, p)| (e, p.0))
-        };
-        if let Some((inst, ipos)) = instigator {
-            // Pick a senior across the room.
-            let target_pos: Option<Pos> = {
-                let mut q = world.query_filtered::<(&Kind, &Position), With<Student>>();
-                q.iter(world)
-                    .filter(|(k, _)| k.0.starts_with("senior_"))
-                    .map(|(_, p)| p.0)
-                    .min_by_key(|p| p.manhattan(ipos))
-            };
-            // Find the tray in the instigator's inventory.
-            let tray: Option<Entity> = world.get::<Inventory>(inst).and_then(|inv| {
-                inv.0.iter().copied().next()
-            });
-            if let (Some(tray), Some(tpos)) = (tray, target_pos) {
-                if let Some(mut q) = world.get_mut::<TaskQueue>(inst) {
-                    q.clear();
-                    q.push(Task::Throw(tray, tpos));
+    type Hit = (Entity, Entity);
+    let hits: Vec<Hit> = world.resource::<EventLog>().events_at(tick)
+        .filter_map(|e| match e {
+            Event::EntityAttacked { attacker: Some(a), target, .. } => Some((*a, *target)),
+            _ => None,
+        })
+        .collect();
+    for (attacker, target) in hits {
+        // Did the attacker just THROW a food item this tick? Look
+        // for an ItemDropped event from the same actor.
+        let thrown_food: Option<f32> = world
+            .resource::<EventLog>()
+            .events_at(tick)
+            .find_map(|e| match e {
+                Event::ItemDropped { dropper, item, .. } if *dropper == attacker => {
+                    let mat = world.get::<fortress_engine::ItemMaterial>(*item).map(|m| m.0)?;
+                    let m = world.resource::<VoxelWorld>().material(mat)?;
+                    Some(m.smell_intensity + 0.5)
                 }
-                world.resource_mut::<EventLog>().push(tick, Event::Note(
-                    "A freshman stands up on the table and hurls a plate of mashed potato across the cafeteria.".into()
-                ));
+                _ => None,
+            });
+        if let Some(vividness) = thrown_food {
+            if world.get::<Messiness>(target).is_none() {
+                world.entity_mut(target).insert(Messiness::default());
+            }
+            if let Some(mut m) = world.get_mut::<Messiness>(target) {
+                m.add(vividness * 0.35);
             }
         }
     }
-    // After the first impact, anyone with food in hand and a visible
-    // hostile starts chucking.
-    let alarmed: Vec<(Entity, Pos)> = {
-        let mut q = world.query_filtered::<(Entity, &Position, &Perceived), With<Student>>();
-        q.iter(world)
-            .filter(|(_, _, p)| p.loudest_violent().is_some())
-            .map(|(e, p, _)| (e, p.0))
-            .collect()
-    };
-    for (actor, pos) in alarmed {
-        let queue_empty = world.get::<TaskQueue>(actor).map(|q| q.is_empty()).unwrap_or(true);
-        if !queue_empty { continue; }
-        // Pick the closest visible non-self.
-        let target: Option<Pos> = world.get::<Perceived>(actor).and_then(|p| {
-            p.seen.iter()
-                .filter(|s| world.get::<Student>(s.entity).is_some())
-                .filter(|s| s.entity != actor)
-                .min_by_key(|s| s.distance)
-                .map(|s| s.position)
-        });
-        // Find a food item to throw.
-        let food: Option<Entity> = world.get::<Inventory>(actor).and_then(|inv| {
-            inv.0.iter().copied().find(|item| {
-                world.get::<fortress_engine::ItemName>(*item)
-                    .map(|n| n.0.contains("ketchup") || n.0.contains("potato") || n.0.contains("oatmeal"))
-                    .unwrap_or(false)
-            })
-        });
-        if let (Some(food), Some(tpos)) = (food, target) {
-            if let Some(mut q) = world.get_mut::<TaskQueue>(actor) {
-                q.push(Task::Throw(food, tpos));
-            }
-            if let Some(mut g) = world.get_mut::<Goal>(actor) {
-                *g = Goal::GoTo(pos);
-            }
-            world.entity_mut(actor).insert(Locomotion::Running);
-        }
+}
+
+// Slow per-tick drying: ketchup drips off, potato gets brushed.
+fn decay_messiness(world: &mut World) {
+    let mut q = world.query::<&mut Messiness>();
+    for mut m in q.iter_mut(world) {
+        m.0 = (m.0 - 0.005).max(0.0);
     }
 }
 

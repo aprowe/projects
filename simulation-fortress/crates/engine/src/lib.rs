@@ -14,6 +14,7 @@ pub mod combat;
 pub mod components;
 pub mod dialog;
 pub mod door;
+pub mod drive;
 pub mod fire;
 pub mod furniture;
 pub mod inject;
@@ -58,6 +59,10 @@ pub use dialog::{
     Identity, Knowledge, Observer, Suspicion,
 };
 pub use door::{door_at, door_voxel_sync, Door, DoorState};
+pub use drive::{
+    drive_planner, BreakUpFight, CleanSpills, Drive, Drives, ExitUnfamiliar, FleeFromViolence,
+    Idle, Messiness, ReturnHome, WinFoodFight, THRESHOLD_ACT, THRESHOLD_INTERRUPT,
+};
 pub use fire::{tick_fire, Burning};
 pub use furniture::{
     furniture_emit_system, tick_carrying, Carried, Climbable, Container, Furniture,

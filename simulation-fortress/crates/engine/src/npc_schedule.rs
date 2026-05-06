@@ -130,6 +130,14 @@ pub fn tick_schedules(world: &mut World) {
                     apply_status(world, entity, StatusKind::Sleeping, 60, 1);
                 }
             }
+            // Keep the queue non-empty so the generic drive_planner
+            // doesn't pull the actor away from their scheduled spot.
+            // A short Wait reasserts every tick.
+            if !busy {
+                if let Some(mut q) = world.get_mut::<TaskQueue>(entity) {
+                    q.push(Task::Wait(2));
+                }
+            }
             continue;
         }
         if entry_changed {
