@@ -12,6 +12,10 @@ Rules:
 - Output ONLY the JSON object. No preamble, no commentary, no markdown fences.
 - Every input key must appear in the output.`;
 
+const INDEX_KEY = "__lru_index__";
+const MAX_CACHE_ENTRIES = 5000;
+const EVICT_TARGET = 4000;
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === "rewrite") {
     handleRewrite(msg.textMap).then(sendResponse);
@@ -28,6 +32,37 @@ async function cacheKey(prompt, model, text) {
       .join("")
       .slice(0, 32)
   );
+}
+
+// Serialize index reads/writes within this service-worker instance so
+// concurrent chunks don't clobber each other's timestamp updates.
+let indexLock = Promise.resolve();
+function withIndex(fn) {
+  const next = indexLock.then(fn);
+  indexLock = next.catch(() => {});
+  return next;
+}
+
+async function touchAndPrune(touchKeys, writes) {
+  return withIndex(async () => {
+    const { [INDEX_KEY]: stored } = await chrome.storage.local.get(INDEX_KEY);
+    const index = stored || {};
+    const now = Date.now();
+    for (const k of touchKeys) index[k] = now;
+
+    let evicted = [];
+    const entries = Object.entries(index);
+    if (entries.length > MAX_CACHE_ENTRIES) {
+      entries.sort((a, b) => a[1] - b[1]);
+      const removeCount = entries.length - EVICT_TARGET;
+      const toRemove = entries.slice(0, removeCount);
+      for (const [k] of toRemove) delete index[k];
+      evicted = toRemove.map(([k]) => k);
+    }
+
+    await chrome.storage.local.set({ [INDEX_KEY]: index, ...writes });
+    if (evicted.length) await chrome.storage.local.remove(evicted);
+  });
 }
 
 async function handleRewrite(textMap) {
@@ -56,13 +91,21 @@ async function handleRewrite(textMap) {
 
     const result = {};
     const missMap = {};
+    const hitKeys = [];
     for (const [i, text] of Object.entries(textMap)) {
       const hit = cached[keyByIndex[i]];
-      if (typeof hit === "string") result[i] = hit;
-      else missMap[i] = text;
+      if (typeof hit === "string") {
+        result[i] = hit;
+        hitKeys.push(keyByIndex[i]);
+      } else {
+        missMap[i] = text;
+      }
     }
 
     if (Object.keys(missMap).length === 0) {
+      touchAndPrune(hitKeys, {}).catch((e) => {
+        console.warn("[Claude Rewriter] cache touch failed:", e);
+      });
       return { ok: true, result };
     }
 
@@ -114,14 +157,16 @@ async function handleRewrite(textMap) {
     }
 
     const toCache = {};
+    const newKeys = [];
     for (const [i, rewritten] of Object.entries(parsed)) {
       if (typeof rewritten !== "string") continue;
       if (missMap[i] === undefined) continue;
       result[i] = rewritten;
       toCache[keyByIndex[i]] = rewritten;
+      newKeys.push(keyByIndex[i]);
     }
-    if (Object.keys(toCache).length) {
-      chrome.storage.local.set(toCache).catch((e) => {
+    if (hitKeys.length || newKeys.length) {
+      touchAndPrune([...hitKeys, ...newKeys], toCache).catch((e) => {
         console.warn("[Claude Rewriter] cache write failed:", e);
       });
     }
