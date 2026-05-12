@@ -41,9 +41,9 @@
     NodeFilter.SHOW_TEXT,
     {
       acceptNode(node) {
-        if (!node.nodeValue || !node.nodeValue.trim()) {
-          return NodeFilter.FILTER_REJECT;
-        }
+        const text = node.nodeValue;
+        if (!text || !text.trim()) return NodeFilter.FILTER_REJECT;
+        if (text.trim().split(/\s+/).length < 5) return NodeFilter.FILTER_REJECT;
         if (shouldSkip(node)) return NodeFilter.FILTER_REJECT;
         return NodeFilter.FILTER_ACCEPT;
       },
