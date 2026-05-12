@@ -19,6 +19,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 });
 
+async function cacheKey(prompt, model, text) {
+  const data = new TextEncoder().encode(`${prompt}\x00${model}\x00${text}`);
+  const digest = await crypto.subtle.digest("SHA-256", data);
+  return (
+    "c1_" +
+    Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0"))
+      .join("")
+      .slice(0, 32)
+  );
+}
+
 async function handleRewrite(textMap) {
   try {
     const { apiKey, prompt, model } = await chrome.storage.local.get([
@@ -35,6 +46,25 @@ async function handleRewrite(textMap) {
     if (!prompt) {
       return { ok: false, error: "No rewrite prompt set." };
     }
+    const modelId = model || "claude-opus-4-7";
+
+    const keyByIndex = {};
+    for (const [i, text] of Object.entries(textMap)) {
+      keyByIndex[i] = await cacheKey(prompt, modelId, text);
+    }
+    const cached = await chrome.storage.local.get(Object.values(keyByIndex));
+
+    const result = {};
+    const missMap = {};
+    for (const [i, text] of Object.entries(textMap)) {
+      const hit = cached[keyByIndex[i]];
+      if (typeof hit === "string") result[i] = hit;
+      else missMap[i] = text;
+    }
+
+    if (Object.keys(missMap).length === 0) {
+      return { ok: true, result };
+    }
 
     const resp = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -45,13 +75,13 @@ async function handleRewrite(textMap) {
         "anthropic-dangerous-direct-browser-access": "true",
       },
       body: JSON.stringify({
-        model: model || "claude-opus-4-7",
+        model: modelId,
         max_tokens: 16000,
         system: SYSTEM_PROMPT,
         messages: [
           {
             role: "user",
-            content: `Instruction: ${prompt}\n\nTexts to rewrite:\n${JSON.stringify(textMap)}`,
+            content: `Instruction: ${prompt}\n\nTexts to rewrite:\n${JSON.stringify(missMap)}`,
           },
         ],
       }),
@@ -83,7 +113,20 @@ async function handleRewrite(textMap) {
       };
     }
 
-    return { ok: true, result: parsed };
+    const toCache = {};
+    for (const [i, rewritten] of Object.entries(parsed)) {
+      if (typeof rewritten !== "string") continue;
+      if (missMap[i] === undefined) continue;
+      result[i] = rewritten;
+      toCache[keyByIndex[i]] = rewritten;
+    }
+    if (Object.keys(toCache).length) {
+      chrome.storage.local.set(toCache).catch((e) => {
+        console.warn("[Claude Rewriter] cache write failed:", e);
+      });
+    }
+
+    return { ok: true, result };
   } catch (e) {
     return { ok: false, error: e.message };
   }
