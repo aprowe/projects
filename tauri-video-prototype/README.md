@@ -22,6 +22,37 @@ Low-latency video playback prototype:
 - The frontend uses `requestAnimationFrame`-free draws: the channel
   callback paints immediately, so the only buffering is the OS compositor.
 
+## Latency detector
+
+Every frame carries two Rust wall-clock timestamps in its header:
+
+| Field              | Captured when                              |
+| ------------------ | ------------------------------------------ |
+| `capture_unix_us`  | Decoder produced the frame (post-`receive_frame`) |
+| `send_unix_us`     | Immediately before `channel.send`          |
+
+The frontend records two more (`recv_unix_us` at the `onmessage` entry,
+`paint_unix_us` right after `putImageData`) and computes:
+
+- `decode→send` — Rust-side: scale + RGBA copy + IPC serialize
+- `send→recv`   — cross-boundary: Tauri IPC + WebView main thread wake
+- `recv→paint`  — JS-side: header parse + ImageData blit
+- `total`       — `paint_us - capture_us`
+
+The HUD shows mean / p50 / p99 / max over a 256-sample ring. The bar
+turns yellow at >20 ms p99 and red at >50 ms p99.
+
+**Clock alignment.** Both sides use system wall clock (`SystemTime` in
+Rust, `performance.timeOrigin + performance.now()` in JS) so the
+timestamps are directly subtractable without a sync handshake. NTP
+adjustments mid-stream would produce negative deltas; those samples are
+dropped rather than smoothed.
+
+**What `recv→paint` does NOT measure.** `putImageData` returns when the
+draw is queued, not when the pixels hit the panel. For
+display-to-photons latency, point a high-speed camera at the canvas; the
+top-left pixel can be made a frame counter (TODO) for visual sync.
+
 ## Running
 
 ```bash

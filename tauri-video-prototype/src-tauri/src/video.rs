@@ -1,15 +1,21 @@
 //! ffmpeg-next based decoder that pushes RGBA frames through a Tauri
 //! `Channel` as raw binary IPC messages.
 //!
-//! Wire format of each message (little-endian, no padding):
-//!   [u32 width][u32 height][i64 pts_us][u8 * width * height * 4 rgba]
+//! Wire format of each message (little-endian, no padding, 32-byte header):
+//!   [u32 width]
+//!   [u32 height]
+//!   [i64 pts_us]            — presentation timestamp in the source stream
+//!   [i64 capture_unix_us]   — wall-clock when decoder produced the frame
+//!   [i64 send_unix_us]      — wall-clock immediately before channel.send
+//!   [u8 * width * height * 4 rgba]
 //!
-//! The frontend pulls width/height out of the first 16 bytes and uses the
-//! rest as the `ImageData` pixel buffer. No JSON, no base64 in the hot path.
+//! Frontend uses the two wall-clock fields together with its own receive
+//! and post-paint timestamps to compute end-to-end latency.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Context, Result};
 use ffmpeg_next as ffmpeg;
@@ -30,7 +36,14 @@ impl IpcResponse for FrameMessage {
     }
 }
 
-const HEADER_LEN: usize = 4 + 4 + 8; // width + height + pts_us
+const HEADER_LEN: usize = 4 + 4 + 8 + 8 + 8; // w + h + pts + capture + send
+
+fn unix_us() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_micros() as i64)
+        .unwrap_or(0)
+}
 
 pub struct DecoderHandle {
     cancel: Arc<AtomicBool>,
@@ -116,6 +129,7 @@ fn decode_loop(path: &str, channel: &Channel<FrameMessage>, cancel: &AtomicBool)
             if cancel.load(Ordering::Relaxed) {
                 return Ok(());
             }
+            let capture_us = unix_us();
             scaler.run(&decoded, &mut rgba)?;
 
             // RGBA plane may be padded per-row; copy line-by-line so the
@@ -136,6 +150,11 @@ fn decode_loop(path: &str, channel: &Channel<FrameMessage>, cancel: &AtomicBool)
                 })
                 .unwrap_or(0);
             buf.extend_from_slice(&pts_us.to_le_bytes());
+            buf.extend_from_slice(&capture_us.to_le_bytes());
+
+            // Reserve the send_us slot; we patch it in just before the call.
+            let send_us_offset = buf.len();
+            buf.extend_from_slice(&0i64.to_le_bytes());
 
             if stride == row_bytes {
                 buf.extend_from_slice(&plane[..pixel_bytes]);
@@ -145,6 +164,10 @@ fn decode_loop(path: &str, channel: &Channel<FrameMessage>, cancel: &AtomicBool)
                     buf.extend_from_slice(&plane[row_start..row_start + row_bytes]);
                 }
             }
+
+            let send_us = unix_us();
+            buf[send_us_offset..send_us_offset + 8]
+                .copy_from_slice(&send_us.to_le_bytes());
 
             if channel.send(FrameMessage(buf)).is_err() {
                 return Ok(());
