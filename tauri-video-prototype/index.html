@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>tauri-video-prototype</title>
+    <style>
+      html, body {
+        margin: 0;
+        padding: 0;
+        background: #000;
+        color: #ddd;
+        font-family: system-ui, sans-serif;
+        overflow: hidden;
+        height: 100%;
+      }
+      #wrap {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 100%;
+        gap: 8px;
+      }
+      #stage {
+        background: #111;
+        image-rendering: pixelated;
+        max-width: 100vw;
+        max-height: 90vh;
+      }
+      #status {
+        font-size: 12px;
+        opacity: 0.7;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="wrap">
+      <canvas id="stage" width="16" height="16"></canvas>
+      <div id="status">idle</div>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
