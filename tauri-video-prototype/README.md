@@ -22,6 +22,42 @@ Low-latency video playback prototype:
 - The frontend uses `requestAnimationFrame`-free draws: the channel
   callback paints immediately, so the only buffering is the OS compositor.
 
+## Playback rate (sine-wave mode)
+
+The decoder paces frames in wall-clock time. Speed is computed as
+
+```
+speed(t) = max(MIN_SPEED, base_speed + amplitude * sin(2π t / period_s))
+```
+
+where `t` is seconds since the current mode was selected. Presets live in
+the top-right control panel:
+
+| Mode          | base | amplitude | period |
+| ------------- | ---- | --------- | ------ |
+| realtime      | 1.0  | 0.0       | —      |
+| sine · gentle | 1.0  | 0.5       | 6 s    |
+| sine · wild   | 1.0  | 0.9       | 3 s    |
+| sine · slow   | 1.0  | 0.5       | 12 s   |
+
+Switching mode resets the wave's phase to 0 so the speed-up always starts
+from 1.0×. The currently-applied speed is sent in every frame header and
+shown on the HUD plus a live speed bar (0× left, 1× center, 2× right).
+
+The custom Tauri command is:
+
+```js
+import { invoke } from "@tauri-apps/api/core";
+await invoke("set_playback", {
+  config: { base_speed: 1.0, amplitude: 0.7, period_s: 4.0 },
+});
+```
+
+The pacer uses a "target wall time" scheme — it sleeps until the planned
+send instant rather than sleeping a per-frame delta — so it doesn't
+accumulate scheduler jitter. If it falls more than 250 ms behind (e.g.
+after a big speed-up) it resyncs instead of sprinting through a backlog.
+
 ## Latency detector
 
 Every frame carries two Rust wall-clock timestamps in its header:
