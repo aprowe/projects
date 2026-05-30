@@ -125,9 +125,10 @@ function velStep(dt) {
 // momentum are DEPOSITED into the incompressible pressure-grid solver, which
 // then makes it splash, sheet down the dome, and pool like a real fluid.
 const DROP_G = 0.13;          // gravity on an in-flight droplet (cells/frame^2)
-const DROP_R = 2.7;           // droplet render radius (cells)
-const DRIP_PERIOD = 28;       // frames between drips: one drip = one drop
-const DRIP_X = Math.round(N / 2) - 7, DRIP_Y = 5; // faucet off-apex so it sheets down a flank
+const DROP_R = 2.3;           // droplet render radius (cells)
+const RAIN_PERIOD = 5;        // frames between raindrops
+const RAIN_PER = 1;           // raindrops spawned each period
+const DRIP_Y = 4;             // drops start near the top
 const DOME_CX = N / 2, DOME_CY = N, DOME_R = N * 0.26;
 const GRID_G = 4.5;           // buoyancy gravity on the deposited fluid (runs it down)
 const DEP_DENS = 9.0;         // density injected when a drop lands (~ the drop's volume)
@@ -168,7 +169,9 @@ function depositToGrid(tx, ty, vx, vy) {
 }
 
 function updateDrops(frame) {
-  if (frame % DRIP_PERIOD === 0) drops.push({ x: DRIP_X, y: DRIP_Y, vx: 0, vy: 0.5 });
+  if (frame % RAIN_PERIOD === 0)
+    for (let n = 0; n < RAIN_PER; n++)
+      drops.push({ x: 4 + Math.random() * (N - 8), y: DRIP_Y, vx: 0, vy: 0.6 + Math.random() * 0.5 });
 
   const surf = DOME_R + DROP_R * 0.6;
   for (const d of drops) {
