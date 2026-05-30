@@ -130,8 +130,8 @@ const DRIP_PERIOD = 28;       // frames between drips: one drip = one drop
 const DRIP_X = Math.round(N / 2) - 7, DRIP_Y = 5; // faucet off-apex so it sheets down a flank
 const DOME_CX = N / 2, DOME_CY = N, DOME_R = N * 0.26;
 const GRID_G = 4.5;           // buoyancy gravity on the deposited fluid (runs it down)
-const DEP_DENS = 28.0;        // density injected when a drop lands
-const GRID_VIS = 1.4;         // how strongly grid fluid contributes to the render field
+const DEP_DENS = 9.0;         // density injected when a drop lands (~ the drop's volume)
+const GRID_VIS = 1.7;         // how strongly grid fluid contributes to the render field
 
 const solid = new Uint8Array(SIZE);
 function buildDome() {
@@ -162,8 +162,8 @@ function depositToGrid(tx, ty, vx, vy) {
     if (i < 1 || i > N || j < 1 || j > N || solid[IX(i, j)]) continue;
     const w = (oi === 0 && oj === 0) ? 1 : 0.6;
     dens[IX(i, j)] += DEP_DENS * w;
-    u[IX(i, j)] += vx * 0.3 + tgx * speed * 0.8;  // momentum + downhill splash
-    v[IX(i, j)] += vy * 0.3 + tgy * speed * 0.8;
+    u[IX(i, j)] += vx * 0.3 + tgx * speed * 0.5;  // momentum + downhill splash
+    v[IX(i, j)] += vy * 0.3 + tgy * speed * 0.5;
   }
 }
 
@@ -196,7 +196,7 @@ function gridStep() {
   for (let c = 0; c < SIZE; c++) if (!solid[c]) v[c] += DT * GRID_G * dens[c]; // buoyancy
   velStep(DT); applySolid();
   densStep(DT); applySolid();
-  for (let i = 1; i <= N; i++) dens[IX(i, N)] *= 0.96;  // mild floor drain (let it pool)
+  for (let i = 1; i <= N; i++) { dens[IX(i, N)] *= 0.9; dens[IX(i, N - 1)] *= 0.95; } // floor drain
 }
 
 // Bilinear sample of the grid dye field at fractional grid coords.
