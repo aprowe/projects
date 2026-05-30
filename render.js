@@ -3,8 +3,8 @@
  * Headless CFD renderer -> animated GIF.
  *
  * Runs the same stable-fluids Navier-Stokes solver as index.html, but with a
- * scripted scene (inflow jets + a central vortex) so the flow evolves on its
- * own. Each frame is mapped through a 256-colour gradient palette straight to
+ * scripted scene: rain drops falling under gravity onto a solid dome. Each
+ * frame is mapped through a 256-colour gradient palette straight to
  * GIF colour indices (no quantisation needed), then LZW-encoded into a looping
  * GIF89a. Pure Node, zero npm dependencies.
  *
@@ -88,28 +88,36 @@ function velStep(dt) {
 }
 
 // --------------------------- Scripted scene --------------------------
-// A steady jet from the left, an angled jet from the bottom, and an initial
-// central vortex. Dye is injected at the jet mouths so structures are visible.
-function seedVortex() {
-  const cx = N/2, cy = N/2;
+// Rain falling under gravity onto a solid dome. In the image, +j is DOWN, so
+// gravity adds positive v. The dome is a solid hemisphere resting on the floor.
+const GRAVITY = 3.0;          // pulls water (dyed mass) downward
+const solid = new Uint8Array(SIZE);
+function buildDome() {
+  const cx = N / 2, R = N * 0.30; // centred on the floor (j = N)
   for (let j = 1; j <= N; j++) for (let i = 1; i <= N; i++) {
-    const dx = i-cx, dy = j-cy, r = Math.hypot(dx, dy)+0.001;
-    if (r < N*0.4) { const s = (1 - r/(N*0.4))*1.6; u[IX(i,j)] += -dy/r*s; v[IX(i,j)] += dx/r*s; }
+    const dx = i - cx, dy = j - N;
+    if (dx * dx + dy * dy <= R * R) solid[IX(i, j)] = 1;
   }
 }
+// Solid cells hold no fluid and no flow; this makes the dome an obstacle.
+function applySolid() {
+  for (let c = 0; c < SIZE; c++) if (solid[c]) { u[c] = 0; v[c] = 0; dens[c] = 0; }
+}
 function forces(frame) {
-  // left jet, centred vertically, with a slow vertical wobble
-  const jy = Math.round(N*0.5 + Math.sin(frame*0.06)*N*0.18);
-  for (let oj = -3; oj <= 3; oj++) {
-    const j = jy + oj; if (j < 1 || j > N) continue;
-    u[IX(2, j)] += 9; dens[IX(2, j)] += 16;
-  }
-  // bottom-left diagonal puffs, pulsing on/off
-  if (Math.floor(frame/14) % 2 === 0) {
-    const bx = Math.round(N*0.25);
-    for (let oi = -2; oi <= 2; oi++) {
-      const i = bx + oi; if (i < 1 || i > N) continue;
-      v[IX(i, 2)] += 7; u[IX(i, 2)] += 2.5; dens[IX(i, 2)] += 13;
+  // Buoyancy-style gravity: only wet (dyed) parcels are heavy, so drops fall
+  // while the surrounding air stays put (uniform gravity would just cancel out).
+  for (let c = 0; c < SIZE; c++) if (!solid[c]) v[c] += DT * GRAVITY * dens[c];
+
+  // Spawn a couple of rain drops along the top each few frames.
+  if (frame % 3 === 0) {
+    for (let d = 0; d < 2; d++) {
+      const cx = 3 + Math.floor(Math.random() * (N - 4));
+      for (let oj = 0; oj < 2; oj++) for (let oi = -1; oi <= 1; oi++) {
+        const i = cx + oi, j = 2 + oj;
+        if (i < 1 || i > N || solid[IX(i, j)]) continue;
+        dens[IX(i, j)] += 6;   // water
+        v[IX(i, j)] += 4.5;    // initial downward kick
+      }
     }
   }
 }
@@ -136,10 +144,11 @@ function frameIndices() {
   const idx = new Uint8Array(N * N);
   for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
     const c = IX(i+1, j+1);
+    if (solid[c]) { idx[i + j*N] = 0; continue; }              // dome -> palette slot 0
     const speed = Math.hypot(u[c], v[c]);
-    let val = 0.45 * Math.tanh(speed * 6) + 0.75 * Math.tanh(dens[c] * 0.22); // flow glow + dye
+    let val = 0.40 * Math.tanh(speed * 5) + 0.80 * Math.tanh(dens[c] * 0.5); // flow glow + water
     if (val > 1) val = 1;
-    idx[i + j*N] = Math.round(val * 255);
+    idx[i + j*N] = Math.max(1, Math.round(val * 255));          // reserve 0 for the dome
   }
   return idx;
 }
@@ -220,13 +229,17 @@ const CELL = parseInt(process.argv[3] || "5", 10);       // px per grid cell
 const W = N * CELL, H = N * CELL;
 const palette = buildPalette();
 
-seedVortex();
+buildDome();
+palette[0] = 122; palette[1] = 126; palette[2] = 140; // dome = stone gray
 const frames = [];
 let peakSpeed = 0, peakMass = 0;
 for (let f = 0; f < FRAMES; f++) {
   uPrev.fill(0); vPrev.fill(0); densPrev.fill(0);
   forces(f);
-  velStep(DT); densStep(DT);
+  velStep(DT); applySolid();
+  densStep(DT); applySolid();
+  // drain water where it pools on the floor so it doesn't fill the box
+  for (let i = 1; i <= N; i++) { dens[IX(i, N)] *= 0.55; dens[IX(i, N - 1)] *= 0.8; }
 
   // upscale interior grid -> WxH index buffer (block scaling)
   const small = frameIndices();
