@@ -91,7 +91,10 @@ function velStep(dt) {
 // Rain falling under gravity onto a solid dome. In the image, +j is DOWN, so
 // gravity adds positive v. The dome is a solid hemisphere resting on the floor.
 const GRAVITY = 3.0;          // pulls water (dyed mass) downward
+const ST_SIGMA = 14;          // surface-tension strength (cohesion)
 const solid = new Uint8Array(SIZE);
+const stnx = new Float32Array(SIZE), stny = new Float32Array(SIZE); // interface normals
+const stcs = new Float32Array(SIZE), stcs2 = new Float32Array(SIZE); // smoothed colour field
 function buildDome() {
   const cx = N / 2, R = N * 0.30; // centred on the floor (j = N)
   for (let j = 1; j <= N; j++) for (let i = 1; i <= N; i++) {
@@ -103,6 +106,43 @@ function buildDome() {
 function applySolid() {
   for (let c = 0; c < SIZE; c++) if (solid[c]) { u[c] = 0; v[c] = 0; dens[c] = 0; }
 }
+// Surface tension via the Continuum Surface Force model (Brackbill 1992).
+// The dye is a colour function c; the interface (our marching-squares contour)
+// is where |grad c| is large. Normal n = grad c / |grad c|, curvature
+// kappa = -div(n), and the force sigma*kappa*grad c is concentrated on that
+// contour, pointing inward on convex blobs -> they round up and merge.
+function surfaceTension(sigma) {
+  // Smooth (mollify) the colour field first: curvature from a sharp/noisy field
+  // produces spurious forces, so CSF is evaluated on a blurred copy.
+  stcs.set(dens);
+  for (let k = 0; k < 2; k++) {
+    for (let j = 1; j <= N; j++) for (let i = 1; i <= N; i++)
+      stcs2[IX(i,j)] = 0.5 * stcs[IX(i,j)] + 0.125 *
+        (stcs[IX(i-1,j)] + stcs[IX(i+1,j)] + stcs[IX(i,j-1)] + stcs[IX(i,j+1)]);
+    stcs.set(stcs2);
+  }
+  const cs = stcs;
+  for (let j = 1; j <= N; j++) for (let i = 1; i <= N; i++) {
+    const c = IX(i, j);
+    const gx = 0.5 * (cs[IX(i+1,j)] - cs[IX(i-1,j)]);
+    const gy = 0.5 * (cs[IX(i,j+1)] - cs[IX(i,j-1)]);
+    const m = Math.hypot(gx, gy);
+    if (m > 1e-3) { stnx[c] = gx / m; stny[c] = gy / m; } else { stnx[c] = 0; stny[c] = 0; }
+  }
+  for (let j = 2; j <= N - 1; j++) for (let i = 2; i <= N - 1; i++) {
+    const c = IX(i, j);
+    if (solid[c]) continue;
+    const kappa = -0.5 * ((stnx[IX(i+1,j)] - stnx[IX(i-1,j)]) +
+                          (stny[IX(i,j+1)] - stny[IX(i,j-1)]));
+    const gx = 0.5 * (cs[IX(i+1,j)] - cs[IX(i-1,j)]);
+    const gy = 0.5 * (cs[IX(i,j+1)] - cs[IX(i,j-1)]);
+    let fx = sigma * kappa * gx, fy = sigma * kappa * gy;
+    const fm = Math.hypot(fx, fy), cap = 6;          // clamp keeps the explicit step stable
+    if (fm > cap) { fx = fx / fm * cap; fy = fy / fm * cap; }
+    u[c] += DT * fx; v[c] += DT * fy;
+  }
+}
+
 function forces(frame) {
   // Buoyancy-style gravity: only wet (dyed) parcels are heavy, so drops fall
   // while the surrounding air stays put (uniform gravity would just cancel out).
@@ -290,6 +330,7 @@ let peakSpeed = 0, peakMass = 0;
 for (let f = 0; f < FRAMES; f++) {
   uPrev.fill(0); vPrev.fill(0); densPrev.fill(0);
   forces(f);
+  surfaceTension(ST_SIGMA);
   velStep(DT); applySolid();
   densStep(DT); applySolid();
   // drain water where it pools on the floor so it doesn't fill the box
