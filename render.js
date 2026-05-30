@@ -146,11 +146,64 @@ function frameIndices() {
     const c = IX(i+1, j+1);
     if (solid[c]) { idx[i + j*N] = 0; continue; }              // dome -> palette slot 0
     const speed = Math.hypot(u[c], v[c]);
-    let val = 0.40 * Math.tanh(speed * 5) + 0.80 * Math.tanh(dens[c] * 0.5); // flow glow + water
+    let val = 0.15 * Math.tanh(speed * 5) + 0.90 * Math.tanh(dens[c] * 0.5); // faint flow + water
     if (val > 1) val = 1;
-    idx[i + j*N] = Math.max(1, Math.round(val * 255));          // reserve 0 for the dome
+    idx[i + j*N] = 2 + Math.round(val * 253);                   // 0=dome, 1=surface line
   }
   return idx;
+}
+
+// ------------------- Marching squares: liquid surface -----------------
+// Trace the iso-contour dens == SURFACE_T across the grid. Each cell is one
+// "square"; we classify its 4 corners against the threshold and emit the
+// line segments where the surface crosses, interpolating the crossing point
+// along each edge. The result is the outline of the liquid.
+const SURFACE_T = 0.22;
+// For each of the 16 corner cases, which edges the contour connects.
+// Edges: 0=top, 1=right, 2=bottom, 3=left.
+const MS_CASES = [
+  [], [[3,0]], [[0,1]], [[3,1]], [[1,2]], [[3,0],[1,2]], [[0,2]], [[3,2]],
+  [[2,3]], [[2,0]], [[0,1],[2,3]], [[2,1]], [[1,3]], [[1,0]], [[0,3]], [],
+];
+function drawLine(buf, x0, y0, x1, y1, ci) {
+  x0 = Math.round(x0); y0 = Math.round(y0); x1 = Math.round(x1); y1 = Math.round(y1);
+  let dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0);
+  let sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1, err = dx + dy;
+  for (;;) {
+    if (x0 >= 0 && x0 < W && y0 >= 0 && y0 < H) {
+      buf[y0 * W + x0] = ci;                                    // 2px line for visibility
+      if (x0 + 1 < W) buf[y0 * W + x0 + 1] = ci;
+    }
+    if (x0 === x1 && y0 === y1) break;
+    const e2 = 2 * err;
+    if (e2 >= dy) { err += dy; x0 += sx; }
+    if (e2 <= dx) { err += dx; y0 += sy; }
+  }
+}
+// Overlay the liquid surface onto an already-rendered WxH frame (index `ci`).
+function overlaySurface(buf, ci) {
+  const cx = (oi) => oi * CELL + CELL / 2;     // grid-cell centre -> pixel x
+  const cy = (oj) => oj * CELL + CELL / 2;
+  const T = SURFACE_T;
+  for (let oj = 0; oj < N - 1; oj++) for (let oi = 0; oi < N - 1; oi++) {
+    const v0 = dens[IX(oi + 1, oj + 1)];       // top-left
+    const v1 = dens[IX(oi + 2, oj + 1)];       // top-right
+    const v2 = dens[IX(oi + 2, oj + 2)];       // bottom-right
+    const v3 = dens[IX(oi + 1, oj + 2)];       // bottom-left
+    const c = (v0 > T ? 1 : 0) | (v1 > T ? 2 : 0) | (v2 > T ? 4 : 0) | (v3 > T ? 8 : 0);
+    const segs = MS_CASES[c];
+    if (!segs.length) continue;
+    // Interpolated crossing point on each edge.
+    const lerp = (a, b) => (T - a) / (b - a);
+    const pts = [
+      [cx(oi) + (cx(oi + 1) - cx(oi)) * lerp(v0, v1), cy(oj)],                 // 0 top
+      [cx(oi + 1), cy(oj) + (cy(oj + 1) - cy(oj)) * lerp(v1, v2)],             // 1 right
+      [cx(oi) + (cx(oi + 1) - cx(oi)) * lerp(v3, v2), cy(oj + 1)],             // 2 bottom
+      [cx(oi), cy(oj) + (cy(oj + 1) - cy(oj)) * lerp(v0, v3)],                 // 3 left
+    ];
+    for (const [e0, e1] of segs)
+      drawLine(buf, pts[e0][0], pts[e0][1], pts[e1][0], pts[e1][1], ci);
+  }
 }
 
 // ----------------------------- GIF89a --------------------------------
@@ -230,7 +283,8 @@ const W = N * CELL, H = N * CELL;
 const palette = buildPalette();
 
 buildDome();
-palette[0] = 122; palette[1] = 126; palette[2] = 140; // dome = stone gray
+palette[0] = 122; palette[1] = 126; palette[2] = 140;   // slot 0: dome = stone gray
+palette[3] = 255; palette[4] = 60;  palette[5] = 60;     // slot 1: surface line = red
 const frames = [];
 let peakSpeed = 0, peakMass = 0;
 for (let f = 0; f < FRAMES; f++) {
@@ -251,6 +305,7 @@ for (let f = 0; f < FRAMES; f++) {
       for (let dx = 0; dx < CELL; dx++) big[row + dx] = val;
     }
   }
+  overlaySurface(big, 1); // marching-squares liquid surface, palette slot 1
   frames.push(big);
 
   // running diagnostics (the "sums")
