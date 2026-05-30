@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<meta name="theme-color" content="#0b0f1a" />
+<title>CFD Sum</title>
+<style>
+  :root {
+    --bg: #0b0f1a;
+    --panel: #131a2b;
+    --line: #243049;
+    --txt: #e8edf7;
+    --muted: #8a97b4;
+    --accent: #4cc9f0;
+    --accent2: #f72585;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; height: 100%;
+    background: var(--bg); color: var(--txt);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    overscroll-behavior: none;
+  }
+  body { display: flex; flex-direction: column; }
+  header {
+    padding: 10px 14px; display: flex; align-items: baseline; gap: 10px;
+    border-bottom: 1px solid var(--line);
+  }
+  header h1 { font-size: 17px; margin: 0; letter-spacing: .5px; }
+  header .sub { font-size: 12px; color: var(--muted); }
+
+  /* Big glanceable totals — easy to read at arm's length in a car */
+  .sums {
+    display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px;
+    padding: 10px 12px;
+  }
+  .sum {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 12px; padding: 10px 12px;
+  }
+  .sum .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; }
+  .sum .value { font-size: 22px; font-weight: 700; margin-top: 2px; font-variant-numeric: tabular-nums; }
+  .sum .unit { font-size: 11px; color: var(--muted); font-weight: 500; }
+  #sum-energy .value { color: var(--accent); }
+  #sum-mass .value { color: var(--accent2); }
+
+  .stage { flex: 1; position: relative; min-height: 0; }
+  canvas {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    display: block; touch-action: none; image-rendering: auto;
+  }
+  .hint {
+    position: absolute; left: 0; right: 0; bottom: 12px; text-align: center;
+    color: var(--muted); font-size: 13px; pointer-events: none;
+    transition: opacity .6s; text-shadow: 0 1px 4px rgba(0,0,0,.8);
+  }
+
+  footer { padding: 10px 12px; display: flex; gap: 8px; border-top: 1px solid var(--line); }
+  button {
+    flex: 1; padding: 12px 8px; font-size: 14px; font-weight: 600;
+    color: var(--txt); background: var(--panel);
+    border: 1px solid var(--line); border-radius: 12px; cursor: pointer;
+  }
+  button:active { background: #1c2740; }
+  button.primary { border-color: var(--accent); color: var(--accent); }
+</style>
+</head>
+<body>
+  <header>
+    <h1>CFD&nbsp;Sum</h1>
+    <span class="sub">stable-fluids Navier&ndash;Stokes &middot; live totals</span>
+  </header>
+
+  <section class="sums">
+    <div class="sum" id="sum-energy">
+      <div class="label">&Sigma; Kinetic energy</div>
+      <div class="value" id="v-energy">0<span class="unit"> units</span></div>
+    </div>
+    <div class="sum" id="sum-mass">
+      <div class="label">&Sigma; Dye mass</div>
+      <div class="value" id="v-mass">0<span class="unit"> units</span></div>
+    </div>
+    <div class="sum">
+      <div class="label">Max speed</div>
+      <div class="value" id="v-speed">0<span class="unit"> u/s</span></div>
+    </div>
+    <div class="sum">
+      <div class="label">&Sigma; |Divergence|</div>
+      <div class="value" id="v-div">0<span class="unit"> (incompr.)</span></div>
+    </div>
+  </section>
+
+  <div class="stage">
+    <canvas id="c"></canvas>
+    <div class="hint" id="hint">Drag / swipe on the field to inject fluid</div>
+  </div>
+
+  <footer>
+    <button id="btn-vortex" class="primary">Add vortex</button>
+    <button id="btn-view">View: dye</button>
+    <button id="btn-reset">Reset</button>
+  </footer>
+
+<script>
+"use strict";
+/*
+ * Minimal 2D CFD solver — Jos Stam, "Real-Time Fluid Dynamics for Games" (2003).
+ * Incompressible Navier–Stokes on a uniform grid, solved with semi-Lagrangian
+ * advection + Gauss–Seidel diffusion/projection. Everything runs in-browser so
+ * the page works offline on a phone with no server.
+ */
+const N = 72;                 // interior grid resolution (NxN); padded by 1 on each side
+const SIZE = (N + 2) * (N + 2);
+const DT = 0.16;              // timestep
+const DIFF = 0.00002;         // dye diffusion
+const VISC = 0.00002;         // kinematic viscosity
+const ITER = 16;              // linear-solver iterations
+
+const IX = (i, j) => i + (N + 2) * j;
+
+function newField() { return new Float32Array(SIZE); }
+let u = newField(), v = newField(), uPrev = newField(), vPrev = newField();
+let dens = newField(), densPrev = newField();
+
+function addSource(x, s, dt) { for (let i = 0; i < SIZE; i++) x[i] += dt * s[i]; }
+
+function setBnd(b, x) {
+  for (let i = 1; i <= N; i++) {
+    x[IX(0, i)]     = b === 1 ? -x[IX(1, i)] : x[IX(1, i)];
+    x[IX(N + 1, i)] = b === 1 ? -x[IX(N, i)] : x[IX(N, i)];
+    x[IX(i, 0)]     = b === 2 ? -x[IX(i, 1)] : x[IX(i, 1)];
+    x[IX(i, N + 1)] = b === 2 ? -x[IX(i, N)] : x[IX(i, N)];
+  }
+  x[IX(0, 0)]         = 0.5 * (x[IX(1, 0)] + x[IX(0, 1)]);
+  x[IX(0, N + 1)]     = 0.5 * (x[IX(1, N + 1)] + x[IX(0, N)]);
+  x[IX(N + 1, 0)]     = 0.5 * (x[IX(N, 0)] + x[IX(N + 1, 1)]);
+  x[IX(N + 1, N + 1)] = 0.5 * (x[IX(N, N + 1)] + x[IX(N + 1, N)]);
+}
+
+function linSolve(b, x, x0, a, c) {
+  const invC = 1 / c;
+  for (let k = 0; k < ITER; k++) {
+    for (let j = 1; j <= N; j++) {
+      for (let i = 1; i <= N; i++) {
+        x[IX(i, j)] = (x0[IX(i, j)] + a * (x[IX(i - 1, j)] + x[IX(i + 1, j)] +
+                       x[IX(i, j - 1)] + x[IX(i, j + 1)])) * invC;
+      }
+    }
+    setBnd(b, x);
+  }
+}
+
+function diffuse(b, x, x0, diff, dt) {
+  const a = dt * diff * N * N;
+  linSolve(b, x, x0, a, 1 + 4 * a);
+}
+
+function advect(b, d, d0, uu, vv, dt) {
+  const dt0 = dt * N;
+  for (let j = 1; j <= N; j++) {
+    for (let i = 1; i <= N; i++) {
+      let x = i - dt0 * uu[IX(i, j)];
+      let y = j - dt0 * vv[IX(i, j)];
+      if (x < 0.5) x = 0.5; if (x > N + 0.5) x = N + 0.5;
+      if (y < 0.5) y = 0.5; if (y > N + 0.5) y = N + 0.5;
+      const i0 = x | 0, i1 = i0 + 1, j0 = y | 0, j1 = j0 + 1;
+      const s1 = x - i0, s0 = 1 - s1, t1 = y - j0, t0 = 1 - t1;
+      d[IX(i, j)] = s0 * (t0 * d0[IX(i0, j0)] + t1 * d0[IX(i0, j1)]) +
+                    s1 * (t0 * d0[IX(i1, j0)] + t1 * d0[IX(i1, j1)]);
+    }
+  }
+  setBnd(b, d);
+}
+
+function project(uu, vv, p, divg) {
+  const h = 1 / N;
+  for (let j = 1; j <= N; j++) {
+    for (let i = 1; i <= N; i++) {
+      divg[IX(i, j)] = -0.5 * h * (uu[IX(i + 1, j)] - uu[IX(i - 1, j)] +
+                        vv[IX(i, j + 1)] - vv[IX(i, j - 1)]);
+      p[IX(i, j)] = 0;
+    }
+  }
+  setBnd(0, divg); setBnd(0, p);
+  linSolve(0, p, divg, 1, 4);
+  for (let j = 1; j <= N; j++) {
+    for (let i = 1; i <= N; i++) {
+      uu[IX(i, j)] -= 0.5 * (p[IX(i + 1, j)] - p[IX(i - 1, j)]) / h;
+      vv[IX(i, j)] -= 0.5 * (p[IX(i, j + 1)] - p[IX(i, j - 1)]) / h;
+    }
+  }
+  setBnd(1, uu); setBnd(2, vv);
+}
+
+function densStep(dt) {
+  addSource(dens, densPrev, dt);
+  [dens, densPrev] = [densPrev, dens]; diffuse(0, dens, densPrev, DIFF, dt);
+  [dens, densPrev] = [densPrev, dens]; advect(0, dens, densPrev, u, v, dt);
+  // gentle decay so the dye fades instead of saturating
+  for (let i = 0; i < SIZE; i++) dens[i] *= 0.992;
+}
+
+function velStep(dt) {
+  addSource(u, uPrev, dt); addSource(v, vPrev, dt);
+  [u, uPrev] = [uPrev, u]; diffuse(1, u, uPrev, VISC, dt);
+  [v, vPrev] = [vPrev, v]; diffuse(2, v, vPrev, VISC, dt);
+  project(u, v, uPrev, vPrev);
+  [u, uPrev] = [uPrev, u]; [v, vPrev] = [vPrev, v];
+  advect(1, u, uPrev, uPrev, vPrev, dt);
+  advect(2, v, vPrev, uPrev, vPrev, dt);
+  project(u, v, uPrev, vPrev);
+}
+
+/* ---------- Summed CFD quantities (the "sum" the app reports) ---------- */
+function computeSums() {
+  let energy = 0, mass = 0, maxSpeed = 0, absDiv = 0;
+  const h = 1 / N;
+  for (let j = 1; j <= N; j++) {
+    for (let i = 1; i <= N; i++) {
+      const uu = u[IX(i, j)], vv = v[IX(i, j)];
+      const sp2 = uu * uu + vv * vv;
+      energy += 0.5 * sp2;                 // Σ ½(u²+v²): total kinetic energy
+      mass += dens[IX(i, j)];              // Σ dye: total scalar mass
+      if (sp2 > maxSpeed) maxSpeed = sp2;  // track max for now, sqrt below
+      absDiv += Math.abs(-0.5 * h * (u[IX(i + 1, j)] - u[IX(i - 1, j)] +
+                          v[IX(i, j + 1)] - v[IX(i, j - 1)]));
+    }
+  }
+  return { energy, mass, maxSpeed: Math.sqrt(maxSpeed), absDiv };
+}
+
+/* ---------------------------- Rendering ----------------------------- */
+const canvas = document.getElementById("c");
+const ctx = canvas.getContext("2d");
+const buf = document.createElement("canvas");
+buf.width = N; buf.height = N;
+const bctx = buf.getContext("2d");
+const img = bctx.createImageData(N, N);
+
+let viewMode = "dye"; // "dye" | "speed"
+
+function draw() {
+  const data = img.data;
+  for (let j = 0; j < N; j++) {
+    for (let i = 0; i < N; i++) {
+      const idx = IX(i + 1, j + 1);
+      const p = (i + j * N) * 4;
+      if (viewMode === "dye") {
+        const d = Math.min(1, dens[idx]);
+        // teal → magenta dye on dark field
+        data[p]     = 30 + d * 220;
+        data[p + 1] = 30 + d * 90 * (1 - d);
+        data[p + 2] = 60 + d * 180;
+        data[p + 3] = 255;
+      } else {
+        const sp = Math.min(1, Math.hypot(u[idx], v[idx]) * 6);
+        // speed heatmap: dark → cyan → white
+        data[p]     = sp * 255;
+        data[p + 1] = 60 + sp * 180;
+        data[p + 2] = 120 + sp * 135;
+        data[p + 3] = 255;
+      }
+    }
+  }
+  bctx.putImageData(img, 0, 0);
+  ctx.imageSmoothingEnabled = true;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(buf, 0, 0, canvas.width, canvas.height);
+}
+
+/* --------------------------- UI plumbing ---------------------------- */
+const vEnergy = document.getElementById("v-energy");
+const vMass = document.getElementById("v-mass");
+const vSpeed = document.getElementById("v-speed");
+const vDiv = document.getElementById("v-div");
+
+function fmt(n, unit) {
+  let s;
+  if (n >= 1000) s = (n / 1000).toFixed(1) + "k";
+  else if (n >= 10) s = n.toFixed(0);
+  else s = n.toFixed(2);
+  return s + '<span class="unit"> ' + unit + "</span>";
+}
+
+let sumTick = 0;
+function loop() {
+  velStep(DT);
+  densStep(DT);
+  draw();
+  if (++sumTick % 3 === 0) {            // update text a few times/sec — cheap & readable
+    const s = computeSums();
+    vEnergy.innerHTML = fmt(s.energy, "units");
+    vMass.innerHTML = fmt(s.mass, "units");
+    vSpeed.innerHTML = fmt(s.maxSpeed, "u/s");
+    vDiv.innerHTML = fmt(s.absDiv, "(incompr.)");
+  }
+  requestAnimationFrame(loop);
+}
+
+/* Pointer interaction: drag injects dye + velocity along the swipe */
+let pointer = { down: false, x: 0, y: 0, px: 0, py: 0 };
+function toGrid(clientX, clientY) {
+  const r = canvas.getBoundingClientRect();
+  const gx = ((clientX - r.left) / r.width) * N + 1;
+  const gy = ((clientY - r.top) / r.height) * N + 1;
+  return { gx: Math.max(1, Math.min(N, gx)), gy: Math.max(1, Math.min(N, gy)) };
+}
+function inject(gx, gy, dx, dy) {
+  const i = gx | 0, j = gy | 0;
+  for (let oj = -1; oj <= 1; oj++) for (let oi = -1; oi <= 1; oi++) {
+    const ci = i + oi, cj = j + oj;
+    if (ci < 1 || ci > N || cj < 1 || cj > N) continue;
+    dens[IX(ci, cj)] += 120;
+    u[IX(ci, cj)] += dx * 5;
+    v[IX(ci, cj)] += dy * 5;
+  }
+}
+function hideHint() { const h = document.getElementById("hint"); if (h) h.style.opacity = 0; }
+
+function onDown(e) { pointer.down = true; const p = pos(e); pointer.x = pointer.px = p.x; pointer.y = pointer.py = p.y; hideHint(); e.preventDefault(); }
+function onMove(e) {
+  if (!pointer.down) return;
+  const p = pos(e); pointer.x = p.x; pointer.y = p.y;
+  const g = toGrid(p.x, p.y);
+  inject(g.gx, g.gy, pointer.x - pointer.px, pointer.y - pointer.py);
+  pointer.px = pointer.x; pointer.py = pointer.y;
+  e.preventDefault();
+}
+function onUp() { pointer.down = false; }
+function pos(e) {
+  if (e.touches && e.touches[0]) return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+  return { x: e.clientX, y: e.clientY };
+}
+canvas.addEventListener("mousedown", onDown);
+canvas.addEventListener("mousemove", onMove);
+window.addEventListener("mouseup", onUp);
+canvas.addEventListener("touchstart", onDown, { passive: false });
+canvas.addEventListener("touchmove", onMove, { passive: false });
+window.addEventListener("touchend", onUp);
+
+/* Buttons */
+document.getElementById("btn-reset").addEventListener("click", () => {
+  u = newField(); v = newField(); uPrev = newField(); vPrev = newField();
+  dens = newField(); densPrev = newField();
+});
+document.getElementById("btn-view").addEventListener("click", (e) => {
+  viewMode = viewMode === "dye" ? "speed" : "dye";
+  e.target.textContent = "View: " + viewMode;
+});
+document.getElementById("btn-vortex").addEventListener("click", () => {
+  hideHint();
+  const cx = N / 2, cy = N / 2;
+  for (let j = 1; j <= N; j++) for (let i = 1; i <= N; i++) {
+    const dx = i - cx, dy = j - cy, r = Math.hypot(dx, dy) + 0.001;
+    if (r < N * 0.42) {
+      const s = (1 - r / (N * 0.42)) * 2.2;
+      u[IX(i, j)] += (-dy / r) * s;
+      v[IX(i, j)] += ( dx / r) * s;
+      dens[IX(i, j)] += 40 * (1 - r / (N * 0.42));
+    }
+  }
+});
+
+/* Fit canvas to its container at device resolution */
+function resize() {
+  const stage = canvas.parentElement;
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = Math.max(1, Math.floor(stage.clientWidth * dpr));
+  canvas.height = Math.max(1, Math.floor(stage.clientHeight * dpr));
+}
+window.addEventListener("resize", resize);
+resize();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
