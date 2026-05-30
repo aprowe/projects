@@ -74,7 +74,7 @@ function densStep(dt) {
   addSource(dens, densPrev, dt);
   [dens, densPrev] = [densPrev, dens]; diffuse(0, dens, densPrev, DIFF, dt);
   [dens, densPrev] = [densPrev, dens]; advect(0, dens, densPrev, u, v, dt);
-  for (let i = 0; i < SIZE; i++) dens[i] *= 0.985;
+  for (let i = 0; i < SIZE; i++) dens[i] *= 0.997; // keep water "heavy" so it sinks all the way
 }
 function velStep(dt) {
   addSource(u, uPrev, dt); addSource(v, vPrev, dt);
@@ -90,7 +90,7 @@ function velStep(dt) {
 // --------------------------- Scripted scene --------------------------
 // Rain falling under gravity onto a solid dome. In the image, +j is DOWN, so
 // gravity adds positive v. The dome is a solid hemisphere resting on the floor.
-const GRAVITY = 3.0;          // pulls water (dyed mass) downward
+const GRAVITY = 7.0;          // pulls water (dyed mass) downward
 const ST_SIGMA = 14;          // surface-tension strength (cohesion)
 const solid = new Uint8Array(SIZE);
 const stnx = new Float32Array(SIZE), stny = new Float32Array(SIZE); // interface normals
