@@ -147,34 +147,82 @@ function updateDrops(frame) {
   for (let i = 1; i <= N; i++) puddle[i] *= 0.999;
 }
 
-// Rasterise the droplets + puddle into the density field used for rendering.
-function buildDropField() {
-  dens.fill(0);
-  const inv = 1 / (DROP_R * DROP_R);
-  for (const d of drops) {
-    const ci = Math.round(d.x), cj = Math.round(d.y);
-    for (let oj = -3; oj <= 3; oj++) for (let oi = -3; oi <= 3; oi++) {
-      const i = ci + oi, j = cj + oj;
-      if (i < 1 || i > N || j < 1 || j > N) continue;
-      dens[IX(i, j)] += 3.2 * Math.exp(-(oi * oi + oj * oj) * inv); // round, smooth drop
+// ------------------------- Liquid renderer ---------------------------
+// Full-resolution metaball rendering. Each droplet is a smooth radial field;
+// summing them makes nearby drops merge gooily (the classic "liquid" look).
+// The iso-surface F = T_SURF is the liquid boundary; shading by depth gives a
+// translucent bright rim over a deep-blue body, plus a specular highlight.
+const T_SURF = 0.6;           // iso-surface threshold
+const DEPTH = 1.3;            // field range mapped across the water ramp
+const WATER0 = 16;            // first water palette index (rim) .. 255 (deep)
+
+function puddleHeightPx(X, t) {
+  const gi = Math.min(N, Math.max(1, Math.floor(X / CELL) + 1));
+  let rows = Math.min(11, puddle[gi] * 3.5);
+  if (rows <= 0) return 0;
+  rows += 0.6 * Math.sin(X * 0.18 + t * 0.25); // gentle surface ripple
+  return Math.max(0, rows) * CELL;
+}
+
+function renderFrame(big, t) {
+  const Rpx = DROP_R * CELL;
+  const R2 = Rpx * Rpx;
+  const domeCx = (DOME_CX - 0.5) * CELL, domeCy = (DOME_CY - 0.5) * CELL, domeR = DOME_R * CELL;
+  // Precompute each drop's pixel centre + teardrop stretch from its velocity.
+  const ds = drops.map(d => {
+    const sp = Math.hypot(d.vx, d.vy);
+    const k = 1 + Math.min(1.5, sp * 0.55);          // elongation along motion
+    const nx = sp > 1e-4 ? d.vx / sp : 0, ny = sp > 1e-4 ? d.vy / sp : 1;
+    return { px: (d.x - 0.5) * CELL, py: (d.y - 0.5) * CELL, k, nx, ny };
+  });
+
+  for (let Y = 0; Y < H; Y++) {
+    for (let X = 0; X < W; X++) {
+      let F = 0;
+      for (const d of ds) {
+        const ex = X - d.px, ey = Y - d.py;
+        const along = ex * d.nx + ey * d.ny, perp = -ex * d.ny + ey * d.nx;
+        const r2 = (along * along) / (d.k * d.k) + perp * perp; // anisotropic distance^2
+        if (r2 < R2) { const s = 1 - r2 / R2; F += s * s; }
+      }
+      const surfPx = puddleHeightPx(X, t);
+      if (surfPx > 0) {
+        const surfY = H - surfPx;
+        if (Y >= surfY) F += 1.2;
+        else if (surfY - Y < 8) F += (1 - (surfY - Y) / 8) * 0.9;
+      }
+
+      let idx;
+      if (F >= T_SURF) {
+        const s = Math.min(1, (F - T_SURF) / DEPTH);
+        idx = WATER0 + Math.round(s * (255 - WATER0));
+      } else {
+        const ddx = X - domeCx, ddy = Y - domeCy;
+        idx = (ddy <= 0 && ddx * ddx + ddy * ddy <= domeR * domeR) ? 0 : 1; // dome : sky
+      }
+      big[Y * W + X] = idx;
     }
   }
-  for (let i = 1; i <= N; i++) {
-    const rows = Math.min(10, puddle[i] * 1.6);
-    if (rows <= 0) continue;
-    for (let j = N - Math.round(rows); j <= N; j++) {
-      if (j < 1 || solid[IX(i, j)]) continue;
-      dens[IX(i, j)] += 3.2;
+
+  // Specular highlight: a small bright dot on the upper-left of each drop.
+  for (const d of ds) {
+    const hx = Math.round(d.px - Rpx * 0.32), hy = Math.round(d.py - Rpx * 0.36);
+    const hr = Math.max(1, Math.round(Rpx * 0.22));
+    for (let oy = -hr; oy <= hr; oy++) for (let ox = -hr; ox <= hr; ox++) {
+      if (ox * ox + oy * oy > hr * hr) continue;
+      const X = hx + ox, Y = hy + oy;
+      if (X < 0 || X >= W || Y < 0 || Y >= H) continue;
+      if (big[Y * W + X] >= WATER0) big[Y * W + X] = 2; // only over water
     }
   }
 }
 
 // ----------------------- Colour palette (256) ------------------------
 function buildPalette() {
-  // dark navy -> blue -> cyan -> green -> yellow -> magenta -> white
+  // water ramp: bright translucent rim -> blue body -> deep blue core
   const stops = [
-    [4, 6, 18], [20, 40, 120], [0, 170, 200], [80, 230, 150],
-    [240, 225, 90], [248, 70, 130], [255, 255, 255],
+    [225, 248, 255], [150, 218, 250], [80, 170, 238],
+    [45, 115, 208], [28, 75, 170], [16, 48, 122],
   ];
   const pal = Buffer.alloc(256 * 3);
   for (let k = 0; k < 256; k++) {
@@ -330,25 +378,15 @@ const W = N * CELL, H = N * CELL;
 const palette = buildPalette();
 
 buildDome();
-palette[0] = 122; palette[1] = 126; palette[2] = 140;   // slot 0: dome = stone gray
-palette[3] = 255; palette[4] = 60;  palette[5] = 60;     // slot 1: surface line = red
+palette[0] = 120; palette[1] = 124; palette[2] = 140;   // slot 0: dome = stone gray
+palette[3] = 10;  palette[4] = 14;  palette[5] = 30;     // slot 1: background sky (dark)
+palette[6] = 255; palette[7] = 255; palette[8] = 255;    // slot 2: specular highlight
 const frames = [];
 let peakSpeed = 0, peakMass = 0;
 for (let f = 0; f < FRAMES; f++) {
-  updateDrops(f);     // move droplets, slide off dome, collect in puddle
-  buildDropField();   // stamp them into the density field for rendering
-
-  // upscale interior grid -> WxH index buffer (block scaling)
-  const small = frameIndices();
+  updateDrops(f);                  // move droplets, slide off dome, collect in puddle
   const big = new Uint8Array(W * H);
-  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
-    const val = small[i + j*N];
-    for (let dy = 0; dy < CELL; dy++) {
-      const row = (j*CELL + dy) * W + i*CELL;
-      for (let dx = 0; dx < CELL; dx++) big[row + dx] = val;
-    }
-  }
-  overlaySurface(big, 1); // marching-squares liquid surface, palette slot 1
+  renderFrame(big, f);             // full-res metaball liquid render
   frames.push(big);
 
   // running diagnostics: drops in flight + total water collected on the floor
