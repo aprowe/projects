@@ -56,17 +56,48 @@ function advect(b, d, d0, uu, vv, dt) {
   }
   setBnd(b, d);
 }
+// Pressure projection with interior-obstacle (dome) boundary conditions.
+// At a fluid/solid face the velocity is reflected (no flow through the dome) and
+// pressure uses a Neumann condition, so the solve deflects flow AROUND the dome
+// instead of letting it vanish into the solid. With no solids this reduces to
+// the plain Stam projection.
 function project(uu, vv, p, divg) {
   const h = 1 / N;
+  const S = (c) => solid[c];
   for (let j = 1; j <= N; j++) for (let i = 1; i <= N; i++) {
-    divg[IX(i,j)] = -0.5*h*(uu[IX(i+1,j)]-uu[IX(i-1,j)]+vv[IX(i,j+1)]-vv[IX(i,j-1)]);
-    p[IX(i,j)] = 0;
+    const c = IX(i, j);
+    if (S(c)) { divg[c] = 0; p[c] = 0; continue; }
+    const uR = S(IX(i+1,j)) ? -uu[c] : uu[IX(i+1,j)];
+    const uL = S(IX(i-1,j)) ? -uu[c] : uu[IX(i-1,j)];
+    const vT = S(IX(i,j+1)) ? -vv[c] : vv[IX(i,j+1)];
+    const vB = S(IX(i,j-1)) ? -vv[c] : vv[IX(i,j-1)];
+    divg[c] = -0.5 * h * ((uR - uL) + (vT - vB));
+    p[c] = 0;
   }
   setBnd(0, divg); setBnd(0, p);
-  linSolve(0, p, divg, 1, 4);
+  for (let k = 0; k < ITER; k++) {
+    for (let j = 1; j <= N; j++) for (let i = 1; i <= N; i++) {
+      const c = IX(i, j);
+      if (S(c)) continue;
+      let sum = 0, n = 0;
+      const L = IX(i-1,j), R = IX(i+1,j), B = IX(i,j-1), T = IX(i,j+1);
+      if (!S(L)) { sum += p[L]; n++; }
+      if (!S(R)) { sum += p[R]; n++; }
+      if (!S(B)) { sum += p[B]; n++; }
+      if (!S(T)) { sum += p[T]; n++; }
+      if (n > 0) p[c] = (divg[c] + sum) / n;
+    }
+    setBnd(0, p);
+  }
   for (let j = 1; j <= N; j++) for (let i = 1; i <= N; i++) {
-    uu[IX(i,j)] -= 0.5*(p[IX(i+1,j)]-p[IX(i-1,j)])/h;
-    vv[IX(i,j)] -= 0.5*(p[IX(i,j+1)]-p[IX(i,j-1)])/h;
+    const c = IX(i, j);
+    if (S(c)) continue;
+    const pR = S(IX(i+1,j)) ? p[c] : p[IX(i+1,j)];
+    const pL = S(IX(i-1,j)) ? p[c] : p[IX(i-1,j)];
+    const pT = S(IX(i,j+1)) ? p[c] : p[IX(i,j+1)];
+    const pB = S(IX(i,j-1)) ? p[c] : p[IX(i,j-1)];
+    uu[c] -= 0.5 * (pR - pL) / h;
+    vv[c] -= 0.5 * (pT - pB) / h;
   }
   setBnd(1, uu); setBnd(2, vv);
 }
@@ -88,16 +119,19 @@ function velStep(dt) {
 }
 
 // --------------------------- Scripted scene --------------------------
-// A faucet drips discrete droplets onto a solid dome. Each drop is a Lagrangian
-// particle (a grid-based smoke solver smears small blobs away, so we track the
-// drops directly) that falls under gravity, slides off the dome, and pools on
-// the floor. Every frame the particles are stamped into the density field so
-// the colour map and marching-squares contour render them as round liquid.
-const DROP_G = 0.13;          // gravity on a droplet (grid cells / frame^2)
+// Hybrid (PIC/FLIP-style) liquid. A faucet drips discrete Lagrangian droplets
+// that fall ballistically (clean, controlled - a grid solver would smear a
+// small drop away). On impact with the dome (or floor) a droplet's mass and
+// momentum are DEPOSITED into the incompressible pressure-grid solver, which
+// then makes it splash, sheet down the dome, and pool like a real fluid.
+const DROP_G = 0.13;          // gravity on an in-flight droplet (cells/frame^2)
 const DROP_R = 2.7;           // droplet render radius (cells)
-const DRIP_PERIOD = 30;       // frames between drips: one drip = one drop
-const DRIP_X = Math.round(N / 2) - 2, DRIP_Y = 5; // faucet just off the apex so drops roll off
-const DOME_CX = N / 2, DOME_CY = N, DOME_R = N * 0.30;
+const DRIP_PERIOD = 28;       // frames between drips: one drip = one drop
+const DRIP_X = Math.round(N / 2) - 7, DRIP_Y = 5; // faucet off-apex so it sheets down a flank
+const DOME_CX = N / 2, DOME_CY = N, DOME_R = N * 0.26;
+const GRID_G = 4.5;           // buoyancy gravity on the deposited fluid (runs it down)
+const DEP_DENS = 28.0;        // density injected when a drop lands
+const GRID_VIS = 1.4;         // how strongly grid fluid contributes to the render field
 
 const solid = new Uint8Array(SIZE);
 function buildDome() {
@@ -106,45 +140,73 @@ function buildDome() {
     if (dx * dx + dy * dy <= DOME_R * DOME_R) solid[IX(i, j)] = 1;
   }
 }
+// The dome is a no-flow obstacle: zero velocity and dye inside it.
+function applySolid() {
+  for (let c = 0; c < SIZE; c++) if (solid[c]) { u[c] = 0; v[c] = 0; dens[c] = 0; }
+}
 
-const drops = [];                       // active droplets {x, y, vx, vy}
-const puddle = new Float32Array(N + 2); // water collected per floor column
+const drops = [];             // in-flight droplets {x, y, vx, vy}
+
+// Hand a droplet off to the grid solver: splat its mass + momentum at the impact
+// point (tx,ty), which the caller places just OUTSIDE the dome (non-solid cells).
+function depositToGrid(tx, ty, vx, vy) {
+  const ci = Math.max(2, Math.min(N - 1, Math.round(tx)));
+  const cj = Math.max(2, Math.min(N - 1, Math.round(ty)));
+  // Downhill tangent of the dome at the impact point, so the splash streaks down.
+  const ndx = tx - DOME_CX, ndy = ty - DOME_CY, nd = Math.hypot(ndx, ndy) || 1e-6;
+  const nx = ndx / nd, ny = ndy / nd;
+  let tgx = -ny, tgy = nx; if (tgy < 0) { tgx = -tgx; tgy = -tgy; } // choose downhill (+y)
+  const speed = Math.hypot(vx, vy);
+  for (let oj = -1; oj <= 1; oj++) for (let oi = -1; oi <= 1; oi++) {
+    const i = ci + oi, j = cj + oj;
+    if (i < 1 || i > N || j < 1 || j > N || solid[IX(i, j)]) continue;
+    const w = (oi === 0 && oj === 0) ? 1 : 0.6;
+    dens[IX(i, j)] += DEP_DENS * w;
+    u[IX(i, j)] += vx * 0.3 + tgx * speed * 0.8;  // momentum + downhill splash
+    v[IX(i, j)] += vy * 0.3 + tgy * speed * 0.8;
+  }
+}
 
 function updateDrops(frame) {
   if (frame % DRIP_PERIOD === 0) drops.push({ x: DRIP_X, y: DRIP_Y, vx: 0, vy: 0.5 });
 
-  const surf = DOME_R + DROP_R * 0.5;   // keep the drop centre this far off the dome
+  const surf = DOME_R + DROP_R * 0.6;
   for (const d of drops) {
     if (d.dead) continue;
-    d.vy += DROP_G;                     // fall
+    d.vy += DROP_G;                    // ballistic fall
     d.x += d.vx; d.y += d.vy;
-    d.vx *= 0.98;
-
-    // Dome contact: project back onto the surface and slide (remove the inward
-    // velocity component, keep the tangential part) so the drop rolls off.
     const dx = d.x - DOME_CX, dy = d.y - DOME_CY, dist = Math.hypot(dx, dy) || 1e-6;
     if (dist < surf && d.y < DOME_CY) {
-      const nx = dx / dist, ny = dy / dist;
-      d.x = DOME_CX + nx * surf; d.y = DOME_CY + ny * surf;
-      const vn = d.vx * nx + d.vy * ny;
-      d.vx -= vn * nx; d.vy -= vn * ny;
-      d.vx += nx * 0.06;                // nudge off the apex so it picks a side
-    }
-    if (d.x < 2) { d.x = 2; d.vx = Math.abs(d.vx) * 0.4; }
-    if (d.x > N - 1) { d.x = N - 1; d.vx = -Math.abs(d.vx) * 0.4; }
-
-    if (d.y >= N - 1) {                 // hit the floor -> add to the puddle
-      const xi = Math.max(1, Math.min(N, Math.round(d.x)));
-      puddle[xi] += 1; d.dead = true;
+      // Project onto the dome surface (just outside it) so the splash lands on
+      // non-solid cells, then hand momentum to the grid.
+      const nx = dx / dist, ny = dy / dist, r = DOME_R + 1.5;
+      depositToGrid(DOME_CX + nx * r, DOME_CY + ny * r, d.vx, d.vy);
+      d.dead = true;
+    } else if (d.y >= N - 1) {         // missed the dome, hit the floor
+      depositToGrid(d.x, N - 1, d.vx, d.vy);
+      d.dead = true;
     }
   }
   for (let n = drops.length - 1; n >= 0; n--) if (drops[n].dead) drops.splice(n, 1);
+}
 
-  // Puddle levels out (shallow-water-ish smoothing) and drains slowly.
-  for (let k = 0; k < 3; k++)
-    for (let i = 2; i <= N - 1; i++)
-      puddle[i] += 0.2 * (puddle[i - 1] + puddle[i + 1] - 2 * puddle[i]);
-  for (let i = 1; i <= N; i++) puddle[i] *= 0.999;
+// One step of the incompressible solver acting on the deposited fluid.
+function gridStep() {
+  uPrev.fill(0); vPrev.fill(0); densPrev.fill(0);
+  for (let c = 0; c < SIZE; c++) if (!solid[c]) v[c] += DT * GRID_G * dens[c]; // buoyancy
+  velStep(DT); applySolid();
+  densStep(DT); applySolid();
+  for (let i = 1; i <= N; i++) dens[IX(i, N)] *= 0.96;  // mild floor drain (let it pool)
+}
+
+// Bilinear sample of the grid dye field at fractional grid coords.
+function sampleDens(gx, gy) {
+  if (gx < 1) gx = 1; else if (gx > N) gx = N;
+  if (gy < 1) gy = 1; else if (gy > N) gy = N;
+  const i0 = gx | 0, j0 = gy | 0, i1 = Math.min(N, i0 + 1), j1 = Math.min(N, j0 + 1);
+  const fx = gx - i0, fy = gy - j0;
+  const a = dens[IX(i0, j0)], b = dens[IX(i1, j0)], c = dens[IX(i0, j1)], e = dens[IX(i1, j1)];
+  return (a * (1 - fx) + b * fx) * (1 - fy) + (c * (1 - fx) + e * fx) * fy;
 }
 
 // ------------------------- Liquid renderer ---------------------------
@@ -155,14 +217,6 @@ function updateDrops(frame) {
 const T_SURF = 0.6;           // iso-surface threshold
 const DEPTH = 1.3;            // field range mapped across the water ramp
 const WATER0 = 16;            // first water palette index (rim) .. 255 (deep)
-
-function puddleHeightPx(X, t) {
-  const gi = Math.min(N, Math.max(1, Math.floor(X / CELL) + 1));
-  let rows = Math.min(11, puddle[gi] * 3.5);
-  if (rows <= 0) return 0;
-  rows += 0.6 * Math.sin(X * 0.18 + t * 0.25); // gentle surface ripple
-  return Math.max(0, rows) * CELL;
-}
 
 function renderFrame(big, t) {
   const Rpx = DROP_R * CELL;
@@ -185,12 +239,8 @@ function renderFrame(big, t) {
         const r2 = (along * along) / (d.k * d.k) + perp * perp; // anisotropic distance^2
         if (r2 < R2) { const s = 1 - r2 / R2; F += s * s; }
       }
-      const surfPx = puddleHeightPx(X, t);
-      if (surfPx > 0) {
-        const surfY = H - surfPx;
-        if (Y >= surfY) F += 1.2;
-        else if (surfY - Y < 8) F += (1 - (surfY - Y) / 8) * 0.9;
-      }
+      // Grid fluid (splashed / sheeting / pooled liquid) sampled into the field.
+      F += sampleDens(X / CELL + 0.5, Y / CELL + 0.5) * GRID_VIS;
 
       let idx;
       if (F >= T_SURF) {
@@ -384,15 +434,16 @@ palette[6] = 255; palette[7] = 255; palette[8] = 255;    // slot 2: specular hig
 const frames = [];
 let peakSpeed = 0, peakMass = 0;
 for (let f = 0; f < FRAMES; f++) {
-  updateDrops(f);                  // move droplets, slide off dome, collect in puddle
+  updateDrops(f);                  // ballistic drops; deposit to grid on impact
+  gridStep();                      // incompressible solver flows the splashed fluid
   const big = new Uint8Array(W * H);
-  renderFrame(big, f);             // full-res metaball liquid render
+  renderFrame(big, f);             // metaball drops + grid fluid, water-shaded
   frames.push(big);
 
-  // running diagnostics: drops in flight + total water collected on the floor
-  let puddleVol = 0; for (let i = 1; i <= N; i++) puddleVol += puddle[i];
-  peakSpeed = Math.max(peakSpeed, drops.length); peakMass = Math.max(peakMass, puddleVol);
-  if (f % 15 === 0) console.log(`frame ${f}: dropsInFlight=${drops.length} puddleVol=${puddleVol.toFixed(1)}`);
+  // running diagnostics: drops in flight + total fluid on the grid
+  let gridMass = 0; for (let c = 0; c < SIZE; c++) gridMass += dens[c];
+  peakSpeed = Math.max(peakSpeed, drops.length); peakMass = Math.max(peakMass, gridMass);
+  if (f % 15 === 0) console.log(`frame ${f}: dropsInFlight=${drops.length} gridFluid=${gridMass.toFixed(0)}`);
 }
 
 writeGif("cfd.gif", frames, W, H, palette, 6); // 6 = 60ms/frame (~16fps)
