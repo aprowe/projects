@@ -105,7 +105,7 @@ function densStep(dt) {
   addSource(dens, densPrev, dt);
   [dens, densPrev] = [densPrev, dens]; diffuse(0, dens, densPrev, DIFF, dt);
   [dens, densPrev] = [densPrev, dens]; advect(0, dens, densPrev, u, v, dt);
-  for (let i = 0; i < SIZE; i++) dens[i] *= 0.997; // keep water "heavy" so it sinks all the way
+  for (let i = 0; i < SIZE; i++) dens[i] *= 0.9995; // negligible decay so the pool persists
 }
 function velStep(dt) {
   addSource(u, uPrev, dt); addSource(v, vPrev, dt);
@@ -129,8 +129,8 @@ const DROP_R = 2.3;           // droplet render radius (cells)
 const RAIN_PERIOD = 5;        // frames between raindrops
 const RAIN_PER = 1;           // raindrops spawned each period
 const DRIP_Y = 4;             // drops start near the top
-const DOME_CX = N / 2, DOME_CY = N, DOME_R = N * 0.26;
-const GRID_G = 4.5;           // buoyancy gravity on the deposited fluid (runs it down)
+const DOME_CX = N / 2, DOME_CY = N, DOME_R = N * 0.20; // small bump -> open floor to pool on
+const GRID_G = 3.0;           // buoyancy gravity on the deposited fluid (runs it down)
 const DEP_DENS = 9.0;         // density injected when a drop lands (~ the drop's volume)
 const GRID_VIS = 1.7;         // how strongly grid fluid contributes to the render field
 
@@ -178,6 +178,11 @@ function updateDrops(frame) {
     if (d.dead) continue;
     d.vy += DROP_G;                    // ballistic fall
     d.x += d.vx; d.y += d.vy;
+    // Merge into existing water (the rising pool, or film on the dome) on contact.
+    const gi = Math.max(1, Math.min(N, Math.round(d.x))), gj = Math.max(1, Math.min(N, Math.round(d.y)));
+    if (!solid[IX(gi, gj)] && dens[IX(gi, gj)] > 2.5) {
+      depositToGrid(d.x, d.y, d.vx, d.vy); d.dead = true; continue;
+    }
     const dx = d.x - DOME_CX, dy = d.y - DOME_CY, dist = Math.hypot(dx, dy) || 1e-6;
     if (dist < surf && d.y < DOME_CY) {
       // Project onto the dome surface (just outside it) so the splash lands on
@@ -199,7 +204,7 @@ function gridStep() {
   for (let c = 0; c < SIZE; c++) if (!solid[c]) v[c] += DT * GRID_G * dens[c]; // buoyancy
   velStep(DT); applySolid();
   densStep(DT); applySolid();
-  for (let i = 1; i <= N; i++) { dens[IX(i, N)] *= 0.9; dens[IX(i, N - 1)] *= 0.95; } // floor drain
+  for (let i = 1; i <= N; i++) dens[IX(i, N)] *= 0.999; // barely drain: let water pool up
 }
 
 // Bilinear sample of the grid dye field at fractional grid coords.
