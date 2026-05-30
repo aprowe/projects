@@ -88,76 +88,83 @@ function velStep(dt) {
 }
 
 // --------------------------- Scripted scene --------------------------
-// Rain falling under gravity onto a solid dome. In the image, +j is DOWN, so
-// gravity adds positive v. The dome is a solid hemisphere resting on the floor.
-const GRAVITY = 7.0;          // pulls water (dyed mass) downward
-const ST_SIGMA = 14;          // surface-tension strength (cohesion)
+// A faucet drips discrete droplets onto a solid dome. Each drop is a Lagrangian
+// particle (a grid-based smoke solver smears small blobs away, so we track the
+// drops directly) that falls under gravity, slides off the dome, and pools on
+// the floor. Every frame the particles are stamped into the density field so
+// the colour map and marching-squares contour render them as round liquid.
+const DROP_G = 0.13;          // gravity on a droplet (grid cells / frame^2)
+const DROP_R = 2.7;           // droplet render radius (cells)
+const DRIP_PERIOD = 30;       // frames between drips: one drip = one drop
+const DRIP_X = Math.round(N / 2) - 2, DRIP_Y = 5; // faucet just off the apex so drops roll off
+const DOME_CX = N / 2, DOME_CY = N, DOME_R = N * 0.30;
+
 const solid = new Uint8Array(SIZE);
-const stnx = new Float32Array(SIZE), stny = new Float32Array(SIZE); // interface normals
-const stcs = new Float32Array(SIZE), stcs2 = new Float32Array(SIZE); // smoothed colour field
 function buildDome() {
-  const cx = N / 2, R = N * 0.30; // centred on the floor (j = N)
   for (let j = 1; j <= N; j++) for (let i = 1; i <= N; i++) {
-    const dx = i - cx, dy = j - N;
-    if (dx * dx + dy * dy <= R * R) solid[IX(i, j)] = 1;
-  }
-}
-// Solid cells hold no fluid and no flow; this makes the dome an obstacle.
-function applySolid() {
-  for (let c = 0; c < SIZE; c++) if (solid[c]) { u[c] = 0; v[c] = 0; dens[c] = 0; }
-}
-// Surface tension via the Continuum Surface Force model (Brackbill 1992).
-// The dye is a colour function c; the interface (our marching-squares contour)
-// is where |grad c| is large. Normal n = grad c / |grad c|, curvature
-// kappa = -div(n), and the force sigma*kappa*grad c is concentrated on that
-// contour, pointing inward on convex blobs -> they round up and merge.
-function surfaceTension(sigma) {
-  // Smooth (mollify) the colour field first: curvature from a sharp/noisy field
-  // produces spurious forces, so CSF is evaluated on a blurred copy.
-  stcs.set(dens);
-  for (let k = 0; k < 2; k++) {
-    for (let j = 1; j <= N; j++) for (let i = 1; i <= N; i++)
-      stcs2[IX(i,j)] = 0.5 * stcs[IX(i,j)] + 0.125 *
-        (stcs[IX(i-1,j)] + stcs[IX(i+1,j)] + stcs[IX(i,j-1)] + stcs[IX(i,j+1)]);
-    stcs.set(stcs2);
-  }
-  const cs = stcs;
-  for (let j = 1; j <= N; j++) for (let i = 1; i <= N; i++) {
-    const c = IX(i, j);
-    const gx = 0.5 * (cs[IX(i+1,j)] - cs[IX(i-1,j)]);
-    const gy = 0.5 * (cs[IX(i,j+1)] - cs[IX(i,j-1)]);
-    const m = Math.hypot(gx, gy);
-    if (m > 1e-3) { stnx[c] = gx / m; stny[c] = gy / m; } else { stnx[c] = 0; stny[c] = 0; }
-  }
-  for (let j = 2; j <= N - 1; j++) for (let i = 2; i <= N - 1; i++) {
-    const c = IX(i, j);
-    if (solid[c]) continue;
-    const kappa = -0.5 * ((stnx[IX(i+1,j)] - stnx[IX(i-1,j)]) +
-                          (stny[IX(i,j+1)] - stny[IX(i,j-1)]));
-    const gx = 0.5 * (cs[IX(i+1,j)] - cs[IX(i-1,j)]);
-    const gy = 0.5 * (cs[IX(i,j+1)] - cs[IX(i,j-1)]);
-    let fx = sigma * kappa * gx, fy = sigma * kappa * gy;
-    const fm = Math.hypot(fx, fy), cap = 6;          // clamp keeps the explicit step stable
-    if (fm > cap) { fx = fx / fm * cap; fy = fy / fm * cap; }
-    u[c] += DT * fx; v[c] += DT * fy;
+    const dx = i - DOME_CX, dy = j - DOME_CY;
+    if (dx * dx + dy * dy <= DOME_R * DOME_R) solid[IX(i, j)] = 1;
   }
 }
 
-function forces(frame) {
-  // Buoyancy-style gravity: only wet (dyed) parcels are heavy, so drops fall
-  // while the surrounding air stays put (uniform gravity would just cancel out).
-  for (let c = 0; c < SIZE; c++) if (!solid[c]) v[c] += DT * GRAVITY * dens[c];
+const drops = [];                       // active droplets {x, y, vx, vy}
+const puddle = new Float32Array(N + 2); // water collected per floor column
 
-  // Spawn a couple of rain drops along the top each few frames.
-  if (frame % 3 === 0) {
-    for (let d = 0; d < 2; d++) {
-      const cx = 3 + Math.floor(Math.random() * (N - 4));
-      for (let oj = 0; oj < 2; oj++) for (let oi = -1; oi <= 1; oi++) {
-        const i = cx + oi, j = 2 + oj;
-        if (i < 1 || i > N || solid[IX(i, j)]) continue;
-        dens[IX(i, j)] += 6;   // water
-        v[IX(i, j)] += 4.5;    // initial downward kick
-      }
+function updateDrops(frame) {
+  if (frame % DRIP_PERIOD === 0) drops.push({ x: DRIP_X, y: DRIP_Y, vx: 0, vy: 0.5 });
+
+  const surf = DOME_R + DROP_R * 0.5;   // keep the drop centre this far off the dome
+  for (const d of drops) {
+    if (d.dead) continue;
+    d.vy += DROP_G;                     // fall
+    d.x += d.vx; d.y += d.vy;
+    d.vx *= 0.98;
+
+    // Dome contact: project back onto the surface and slide (remove the inward
+    // velocity component, keep the tangential part) so the drop rolls off.
+    const dx = d.x - DOME_CX, dy = d.y - DOME_CY, dist = Math.hypot(dx, dy) || 1e-6;
+    if (dist < surf && d.y < DOME_CY) {
+      const nx = dx / dist, ny = dy / dist;
+      d.x = DOME_CX + nx * surf; d.y = DOME_CY + ny * surf;
+      const vn = d.vx * nx + d.vy * ny;
+      d.vx -= vn * nx; d.vy -= vn * ny;
+      d.vx += nx * 0.06;                // nudge off the apex so it picks a side
+    }
+    if (d.x < 2) { d.x = 2; d.vx = Math.abs(d.vx) * 0.4; }
+    if (d.x > N - 1) { d.x = N - 1; d.vx = -Math.abs(d.vx) * 0.4; }
+
+    if (d.y >= N - 1) {                 // hit the floor -> add to the puddle
+      const xi = Math.max(1, Math.min(N, Math.round(d.x)));
+      puddle[xi] += 1; d.dead = true;
+    }
+  }
+  for (let n = drops.length - 1; n >= 0; n--) if (drops[n].dead) drops.splice(n, 1);
+
+  // Puddle levels out (shallow-water-ish smoothing) and drains slowly.
+  for (let k = 0; k < 3; k++)
+    for (let i = 2; i <= N - 1; i++)
+      puddle[i] += 0.2 * (puddle[i - 1] + puddle[i + 1] - 2 * puddle[i]);
+  for (let i = 1; i <= N; i++) puddle[i] *= 0.999;
+}
+
+// Rasterise the droplets + puddle into the density field used for rendering.
+function buildDropField() {
+  dens.fill(0);
+  const inv = 1 / (DROP_R * DROP_R);
+  for (const d of drops) {
+    const ci = Math.round(d.x), cj = Math.round(d.y);
+    for (let oj = -3; oj <= 3; oj++) for (let oi = -3; oi <= 3; oi++) {
+      const i = ci + oi, j = cj + oj;
+      if (i < 1 || i > N || j < 1 || j > N) continue;
+      dens[IX(i, j)] += 3.2 * Math.exp(-(oi * oi + oj * oj) * inv); // round, smooth drop
+    }
+  }
+  for (let i = 1; i <= N; i++) {
+    const rows = Math.min(10, puddle[i] * 1.6);
+    if (rows <= 0) continue;
+    for (let j = N - Math.round(rows); j <= N; j++) {
+      if (j < 1 || solid[IX(i, j)]) continue;
+      dens[IX(i, j)] += 3.2;
     }
   }
 }
@@ -328,13 +335,8 @@ palette[3] = 255; palette[4] = 60;  palette[5] = 60;     // slot 1: surface line
 const frames = [];
 let peakSpeed = 0, peakMass = 0;
 for (let f = 0; f < FRAMES; f++) {
-  uPrev.fill(0); vPrev.fill(0); densPrev.fill(0);
-  forces(f);
-  surfaceTension(ST_SIGMA);
-  velStep(DT); applySolid();
-  densStep(DT); applySolid();
-  // drain water where it pools on the floor so it doesn't fill the box
-  for (let i = 1; i <= N; i++) { dens[IX(i, N)] *= 0.55; dens[IX(i, N - 1)] *= 0.8; }
+  updateDrops(f);     // move droplets, slide off dome, collect in puddle
+  buildDropField();   // stamp them into the density field for rendering
 
   // upscale interior grid -> WxH index buffer (block scaling)
   const small = frameIndices();
@@ -349,14 +351,13 @@ for (let f = 0; f < FRAMES; f++) {
   overlaySurface(big, 1); // marching-squares liquid surface, palette slot 1
   frames.push(big);
 
-  // running diagnostics (the "sums")
-  let e = 0, m = 0, sp = 0;
-  for (let c = 0; c < SIZE; c++) { e += 0.5*(u[c]*u[c]+v[c]*v[c]); m += dens[c]; const s = Math.hypot(u[c], v[c]); if (s > sp) sp = s; }
-  peakSpeed = Math.max(peakSpeed, sp); peakMass = Math.max(peakMass, m);
-  if (f % 20 === 0) console.log(`frame ${f}: ΣKE=${e.toFixed(0)} Σmass=${m.toFixed(0)} maxSpeed=${sp.toFixed(2)}`);
+  // running diagnostics: drops in flight + total water collected on the floor
+  let puddleVol = 0; for (let i = 1; i <= N; i++) puddleVol += puddle[i];
+  peakSpeed = Math.max(peakSpeed, drops.length); peakMass = Math.max(peakMass, puddleVol);
+  if (f % 15 === 0) console.log(`frame ${f}: dropsInFlight=${drops.length} puddleVol=${puddleVol.toFixed(1)}`);
 }
 
 writeGif("cfd.gif", frames, W, H, palette, 6); // 6 = 60ms/frame (~16fps)
 const kb = (fs.statSync("cfd.gif").size / 1024).toFixed(0);
 console.log(`\nWrote cfd.gif  ${W}x${H}  ${FRAMES} frames  ${kb} KB`);
-console.log(`peak ΣKE-driven maxSpeed=${peakSpeed.toFixed(2)}  peak Σmass=${peakMass.toFixed(0)}`);
+console.log(`max drops in flight=${peakSpeed}  total water pooled=${peakMass.toFixed(1)}`);
