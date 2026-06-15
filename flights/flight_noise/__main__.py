@@ -1,3 +1,3 @@
-from .cli import main
+from .cli import dispatch
 
-raise SystemExit(main())
+raise SystemExit(dispatch())

@@ -79,6 +79,9 @@ class NoiseEstimate:
 
     callsign: str
     icao24: str
+    latitude: float
+    longitude: float
+    heading: float | None
     slant_distance_m: float
     horizontal_distance_m: float
     altitude_m: float
@@ -190,6 +193,9 @@ def estimate_aircraft_noise(
     return NoiseEstimate(
         callsign=aircraft.callsign or aircraft.icao24,
         icao24=aircraft.icao24,
+        latitude=aircraft.latitude,
+        longitude=aircraft.longitude,
+        heading=aircraft.true_track,
         slant_distance_m=slant,
         horizontal_distance_m=horiz,
         altitude_m=altitude_agl,

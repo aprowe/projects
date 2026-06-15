@@ -32,6 +32,14 @@ No dependencies — pure Python 3 standard library.
 ```bash
 cd flights
 
+# 1. Interactive setup: find your Roku and store your API keys (optional):
+python3 -m flight_noise setup
+
+# 2. Web dashboard — map, live volume chart, TV controls:
+python3 -m flight_noise serve --demo        # offline demo
+python3 -m flight_noise serve               # live (after setup)
+#    then open http://localhost:8000
+
 # Offline demo with bundled sample data (no network/credentials needed):
 python3 -m flight_noise --demo
 
@@ -97,6 +105,47 @@ When several aircraft are audible, the combined level is computed by **incoheren
 > data, terrain shadowing, wind, temperature gradients, and reflections. Treat it
 > as a physically-reasonable approximation, not a regulatory sound reading.
 
+## Interactive setup
+
+```bash
+python3 -m flight_noise setup
+```
+
+The wizard:
+
+1. **Discovers your Roku** on the LAN via SSDP (or lets you type the IP), tests
+   the connection, and can send a quick volume test.
+2. **Captures your OpenSky API keys** (client id + secret; the secret is read
+   without echoing).
+3. **Sets the target address** (and optional exact coordinates / elevation).
+
+Everything is saved to `~/.config/flight-noise/config.json` (override with
+`FLIGHT_NOISE_CONFIG`) with `0600` permissions, since it holds an API secret.
+Environment variables (`OPENSKY_CLIENT_ID`, `ROKU_IP`, …) still override the file.
+
+## Web dashboard
+
+```bash
+python3 -m flight_noise serve [--port 8000] [--demo] [--interval 8]
+```
+
+Open <http://localhost:8000>. The page shows:
+
+- **Live map** — your address plus every tracked aircraft, colour-coded by the
+  dBA it's producing at your location; audible planes are labelled.
+- **Loudest-now panel** — the current loudest aircraft and the combined level.
+- **Volume & loudness chart** — a real-time time-series of loudest dBA, combined
+  dBA, and the TV volume boost (steps) so you can see the reverse-duck track the
+  planes.
+- **Roku TV panel** — connection status, a boost meter, manual Vol −/+/Mute
+  buttons, and a toggle for automatic reverse-ducking.
+
+A background thread polls flights every `--interval` seconds, runs the model and
+reverse-duck, and keeps a rolling history; the browser polls `/api/state` and
+POSTs to `/api/roku/*` and `/api/duck/*`. (The map and chart load Leaflet and
+Chart.js from a CDN, so the browser needs internet; the server itself is
+stdlib-only.) Use `--roku-dry-run` to drive the controls without a real TV.
+
 ## Reverse-ducking a Roku TV
 
 When a plane gets loud overhead it *masks* your TV audio. With `--roku`, the tool
@@ -147,10 +196,24 @@ flights/
 │   ├── estimator.py   # fetch + rank into a Snapshot
 │   ├── roku.py        # Roku TV ECP client (relative volume + SSDP discovery)
 │   ├── ducker.py      # loudness -> smooth volume-offset controller
-│   └── cli.py         # command-line interface
+│   ├── settings.py    # persisted config (~/.config/flight-noise/config.json)
+│   ├── setup_wizard.py# interactive setup (Roku discovery + API keys)
+│   ├── server.py      # web dashboard server + JSON API
+│   ├── web/index.html # dashboard UI (map, chart, TV controls)
+│   └── cli.py         # command-line interface + subcommand dispatch
 ├── data/sample_states.json   # offline demo data
 └── tests/                     # unit tests (no network)
 ```
+
+## Commands
+
+| Command | Purpose |
+|---------|---------|
+| `python3 -m flight_noise` | one-shot estimate at the address |
+| `python3 -m flight_noise --watch 10` | continuous terminal readout |
+| `python3 -m flight_noise --roku ...` | terminal + reverse-duck a Roku |
+| `python3 -m flight_noise setup` | interactive Roku + API-key setup |
+| `python3 -m flight_noise serve` | web dashboard (map, chart, controls) |
 
 ## Tests
 

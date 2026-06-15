@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Flight Noise Dashboard</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  :root { --bg:#0f1419; --panel:#1a2230; --line:#2a3647; --txt:#e6edf3; --muted:#8b98a9; --accent:#4da3ff; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.4 system-ui,sans-serif; background:var(--bg); color:var(--txt); }
+  header { padding:12px 18px; border-bottom:1px solid var(--line); display:flex; align-items:baseline; gap:14px; flex-wrap:wrap; }
+  header h1 { font-size:17px; margin:0; }
+  header .addr { color:var(--muted); }
+  header .badge { margin-left:auto; font-size:12px; color:var(--muted); }
+  .grid { display:grid; grid-template-columns: 1.4fr 1fr; grid-template-rows:auto auto; gap:14px; padding:14px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:12px; }
+  .card h2 { font-size:13px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); margin:0 0 10px; }
+  #map { height:420px; border-radius:8px; }
+  #chart-wrap { height:240px; }
+  .map-card { grid-row: span 2; }
+  .big { font-size:34px; font-weight:700; }
+  .big small { font-size:14px; color:var(--muted); font-weight:400; }
+  .loud-desc { color:var(--muted); margin-top:4px; min-height:1.2em; }
+  .tv-row { display:flex; align-items:center; gap:8px; margin:8px 0; }
+  .tv-meter { flex:1; height:10px; background:var(--line); border-radius:6px; overflow:hidden; }
+  .tv-meter > div { height:100%; background:var(--accent); width:0; transition:width .4s; }
+  button { background:#26344a; color:var(--txt); border:1px solid var(--line); border-radius:8px; padding:8px 12px; font-size:14px; cursor:pointer; }
+  button:hover { background:#324563; }
+  button:disabled { opacity:.4; cursor:not-allowed; }
+  .controls { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
+  .toggle { display:flex; align-items:center; gap:8px; margin-top:10px; color:var(--muted); }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th,td { text-align:left; padding:5px 6px; border-bottom:1px solid var(--line); }
+  th { color:var(--muted); font-weight:500; }
+  td.dba { font-weight:700; text-align:right; }
+  .pill { font-size:11px; padding:1px 7px; border-radius:10px; background:var(--line); color:var(--muted); }
+  .pill.on { background:#1f4d2e; color:#9be7b4; }
+  .pill.off { background:#4d1f1f; color:#e79b9b; }
+  #err { color:#e79b9b; font-size:12px; min-height:1em; padding:0 18px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>✈️ Flight Noise</h1>
+  <span class="addr" id="addr">…</span>
+  <span class="badge" id="badge"></span>
+</header>
+<div id="err"></div>
+<div class="grid">
+  <div class="card map-card">
+    <h2>Live map</h2>
+    <div id="map"></div>
+  </div>
+
+  <div class="card">
+    <h2>Loudest aircraft now</h2>
+    <div class="big"><span id="louddba">—</span> <small>dBA</small> &nbsp; <span class="pill" id="loudcs"></span></div>
+    <div class="loud-desc" id="louddesc"></div>
+    <div style="margin-top:10px; color:var(--muted)">Combined audible: <b id="combined">—</b> dBA</div>
+  </div>
+
+  <div class="card">
+    <h2>Roku TV</h2>
+    <div id="tvstatus" style="color:var(--muted); margin-bottom:6px;"></div>
+    <div class="tv-row">
+      <span style="color:var(--muted)">Boost</span>
+      <div class="tv-meter"><div id="tvbar"></div></div>
+      <span id="tvoffset" style="min-width:54px; text-align:right;">+0/12</span>
+    </div>
+    <div class="controls">
+      <button data-roku="volume_down">Vol −</button>
+      <button data-roku="volume_up">Vol +</button>
+      <button data-roku="mute">Mute</button>
+    </div>
+    <label class="toggle"><input type="checkbox" id="autoduck" /> Auto reverse-duck (boost while a plane is loud)</label>
+  </div>
+
+  <div class="card" style="grid-column:1 / -1;">
+    <h2>Volume &amp; loudness over time</h2>
+    <div id="chart-wrap"><canvas id="chart"></canvas></div>
+  </div>
+
+  <div class="card" style="grid-column:1 / -1;">
+    <h2>Aircraft in range</h2>
+    <table>
+      <thead><tr><th>Callsign</th><th>dBA</th><th>Alt (ft)</th><th>Slant (ft)</th><th>Perceived</th></tr></thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+let map, addrMarker, planeLayer, chart;
+
+function dbaColor(d) {
+  if (d == null) return "#555";
+  if (d < 45) return "#5a6b7a";
+  if (d < 65) return "#3a9bd6";
+  if (d < 75) return "#f0c419";
+  if (d < 85) return "#f08a24";
+  return "#e0443e";
+}
+
+function initMap(lat, lon) {
+  map = L.map("map").setView([lat, lon], 12);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+    { maxZoom: 18, attribution: "© OpenStreetMap" }).addTo(map);
+  addrMarker = L.marker([lat, lon]).addTo(map).bindPopup("Listener");
+  planeLayer = L.layerGroup().addTo(map);
+}
+
+function initChart() {
+  const ctx = document.getElementById("chart").getContext("2d");
+  chart = new Chart(ctx, {
+    type: "line",
+    data: { datasets: [
+      { label: "Loudest (dBA)", yAxisID: "y", borderColor: "#f08a24", backgroundColor:"#f08a2433", tension:.25, spanGaps:true, pointRadius:0 },
+      { label: "Combined (dBA)", yAxisID: "y", borderColor: "#4da3ff", backgroundColor:"#4da3ff22", tension:.25, spanGaps:true, pointRadius:0 },
+      { label: "TV boost (steps)", yAxisID: "y1", borderColor: "#9be7b4", backgroundColor:"#9be7b433", tension:.1, stepped:true, pointRadius:0 },
+    ]},
+    options: {
+      animation:false, responsive:true, maintainAspectRatio:false,
+      scales: {
+        x: { type:"time", time:{ unit:"minute" }, ticks:{ color:"#8b98a9" }, grid:{ color:"#2a3647" } },
+        y: { position:"left", title:{display:true,text:"dBA",color:"#8b98a9"}, ticks:{ color:"#8b98a9" }, grid:{ color:"#2a3647" }, suggestedMin:40, suggestedMax:100 },
+        y1:{ position:"right", title:{display:true,text:"steps",color:"#8b98a9"}, ticks:{ color:"#8b98a9" }, grid:{ drawOnChartArea:false }, suggestedMin:0 },
+      },
+      plugins:{ legend:{ labels:{ color:"#e6edf3" } } }
+    }
+  });
+}
+
+function updateChart(history) {
+  chart.data.datasets[0].data = history.map(h => ({x:h.t, y:h.loudest_dba}));
+  chart.data.datasets[1].data = history.map(h => ({x:h.t, y:h.combined_dba}));
+  chart.data.datasets[2].data = history.map(h => ({x:h.t, y:h.volume_offset}));
+  chart.update();
+}
+
+function updatePlanes(planes) {
+  planeLayer.clearLayers();
+  planes.forEach(p => {
+    if (p.lat == null || p.lon == null) return;
+    const m = L.circleMarker([p.lat, p.lon], {
+      radius: p.audible ? 9 : 6, color:"#0008", weight:1,
+      fillColor: dbaColor(p.dba), fillOpacity: p.audible ? 0.95 : 0.5,
+    }).bindPopup(`<b>${p.callsign}</b><br>${p.dba} dBA — ${p.description}<br>${p.altitude_ft} ft, ${p.slant_ft} ft slant`);
+    if (p.audible) m.bindTooltip(`${p.callsign} ${p.dba}dBA`, {permanent:true, direction:"top", className:"plane-tip"});
+    m.addTo(planeLayer);
+  });
+}
+
+function updateTable(planes) {
+  document.getElementById("tbody").innerHTML = planes.map(p =>
+    `<tr><td>${p.callsign}</td><td class="dba" style="color:${dbaColor(p.dba)}">${p.dba}</td>`
+    + `<td>${p.altitude_ft.toLocaleString()}</td><td>${p.slant_ft.toLocaleString()}</td>`
+    + `<td style="color:var(--muted)">${p.audible ? p.description : "inaudible"}</td></tr>`).join("");
+}
+
+function updateTV(roku) {
+  const st = document.getElementById("tvstatus");
+  if (!roku.configured) { st.innerHTML = `<span class="pill off">no TV configured</span> run <code>python3 -m flight_noise setup</code>`; }
+  else { st.innerHTML = `<span class="pill on">connected</span> ${roku.ip || ""}`; }
+  const pct = roku.max_steps ? (100 * roku.offset / roku.max_steps) : 0;
+  document.getElementById("tvbar").style.width = Math.max(0, pct) + "%";
+  document.getElementById("tvoffset").textContent = `+${roku.offset}/${roku.max_steps}`;
+  document.getElementById("autoduck").checked = roku.auto_duck;
+  document.querySelectorAll("[data-roku]").forEach(b => b.disabled = !roku.configured);
+}
+
+async function refresh() {
+  let s;
+  try { s = await (await fetch("/api/state")).json(); }
+  catch (e) { document.getElementById("err").textContent = "dashboard offline: " + e; return; }
+
+  document.getElementById("addr").textContent = s.location.address;
+  document.getElementById("badge").textContent =
+    (s.demo ? "DEMO DATA" : "LIVE") + " · " + s.planes.length + " aircraft tracked";
+  document.getElementById("err").textContent = s.error || "";
+
+  if (!map) initMap(s.location.lat, s.location.lon);
+  if (!chart) initChart();
+
+  const loud = s.loudest;
+  document.getElementById("louddba").textContent = loud ? loud.dba.toFixed(1) : "—";
+  document.getElementById("loudcs").textContent = loud ? loud.callsign : "";
+  document.getElementById("louddesc").textContent = loud ? loud.description : "nothing audible overhead";
+  document.getElementById("combined").textContent = s.combined_dba != null ? s.combined_dba : "—";
+
+  updatePlanes(s.planes);
+  updateTable(s.planes);
+  updateChart(s.history);
+  updateTV(s.roku);
+}
+
+document.querySelectorAll("[data-roku]").forEach(btn => {
+  btn.addEventListener("click", async () => {
+    await fetch("/api/roku/" + btn.dataset.roku, { method:"POST" });
+    refresh();
+  });
+});
+document.getElementById("autoduck").addEventListener("change", async (e) => {
+  await fetch("/api/duck/" + (e.target.checked ? "on" : "off"), { method:"POST" });
+  refresh();
+});
+
+refresh();
+setInterval(refresh, 4000);
+</script>
+</body>
+</html>

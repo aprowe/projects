@@ -7,7 +7,7 @@ import os
 import sys
 import time
 
-from .config import DEFAULT_ADDRESS, default_location
+from .config import DEFAULT_ADDRESS, Location, default_location
 from .ducker import DuckConfig, VolumeDucker
 from .estimator import (
     Snapshot,
@@ -17,6 +17,7 @@ from .estimator import (
 from .geocode import geocode
 from .opensky import OpenSkyClient, OpenSkyError
 from .roku import RokuError, RokuTV
+from .settings import load_settings
 
 SAMPLE_PATH = os.path.join(os.path.dirname(__file__), os.pardir, "data", "sample_states.json")
 
@@ -60,8 +61,9 @@ def build_parser() -> argparse.ArgumentParser:
         prog="flight-noise",
         description="Estimate how loud overhead aircraft are at a given address.",
     )
-    p.add_argument("-a", "--address", default=DEFAULT_ADDRESS,
-                   help=f"Street address to monitor (default: {DEFAULT_ADDRESS!r}).")
+    p.add_argument("-a", "--address", default=None,
+                   help=f"Street address to monitor (default: saved setting or "
+                        f"{DEFAULT_ADDRESS!r}).")
     p.add_argument("--lat", type=float, help="Latitude (skips geocoding).")
     p.add_argument("--lon", type=float, help="Longitude (skips geocoding).")
     p.add_argument("--elevation", type=float, default=None,
@@ -100,19 +102,31 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
-def _resolve_location(args):
-    if args.lat is not None and args.lon is not None:
+def resolve_location(args, settings) -> Location:
+    """Build a Location from CLI args, falling back to saved settings."""
+    address = args.address or settings.get("address") or DEFAULT_ADDRESS
+    lat = args.lat if args.lat is not None else settings.get("lat")
+    lon = args.lon if args.lon is not None else settings.get("lon")
+    elevation = args.elevation if args.elevation is not None else settings.get("elevation")
+
+    if lat is not None and lon is not None:
         loc = default_location()
-        loc.address = args.address
-        loc.lat, loc.lon = args.lat, args.lon
+        loc.address, loc.lat, loc.lon = address, float(lat), float(lon)
     else:
-        loc = geocode(args.address)
-    if args.elevation is not None:
-        loc.ground_elevation_m = args.elevation
+        loc = geocode(address)
+    if elevation is not None:
+        loc.ground_elevation_m = float(elevation)
     return loc
 
 
-def _setup_roku(args):
+def opensky_client(settings) -> OpenSkyClient:
+    return OpenSkyClient(
+        client_id=settings.get("opensky_client_id"),
+        client_secret=settings.get("opensky_client_secret"),
+    )
+
+
+def _setup_roku(args, settings):
     """Build (RokuTV, VolumeDucker) if --roku is set, else (None, None)."""
     if not args.roku:
         return None, None
@@ -121,7 +135,7 @@ def _setup_roku(args):
     if args.roku_dry_run:
         transport = lambda key: print(f"    [roku dry-run] keypress {key}")  # noqa: E731
 
-    ip = args.roku_ip or os.getenv("ROKU_IP")
+    ip = args.roku_ip or settings.get("roku_ip")
     if not ip and not args.roku_dry_run:
         print("Discovering Roku via SSDP...", file=sys.stderr)
         ip = RokuTV.discover()
@@ -158,12 +172,12 @@ def _apply_duck(roku, ducker, snap) -> None:
           f"(target +{target}, source {src})")
 
 
-def _run_once(args, location, roku=None, ducker=None) -> int:
+def _run_once(args, location, settings, roku=None, ducker=None) -> int:
     try:
         if args.demo:
             snap = estimate_from_states_file(location, os.path.abspath(SAMPLE_PATH))
         else:
-            client = OpenSkyClient()
+            client = opensky_client(settings)
             if not client.authenticated:
                 print("warning: no OPENSKY_CLIENT_ID/SECRET set; trying anonymous "
                       "access (often blocked). Use --demo for an offline example.",
@@ -181,8 +195,9 @@ def _run_once(args, location, roku=None, ducker=None) -> int:
 
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
-    location = _resolve_location(args)
-    roku, ducker = _setup_roku(args)
+    settings = load_settings()
+    location = resolve_location(args, settings)
+    roku, ducker = _setup_roku(args, settings)
 
     if args.watch:
         try:
@@ -190,7 +205,7 @@ def main(argv=None) -> int:
                 print("\033[2J\033[H", end="")  # clear screen
                 print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}]  refreshing every {args.watch}s "
                       f"(Ctrl-C to quit)\n")
-                _run_once(args, location, roku, ducker)
+                _run_once(args, location, settings, roku, ducker)
                 time.sleep(args.watch)
         except KeyboardInterrupt:
             # Restore the TV to its baseline volume before exiting.
@@ -203,8 +218,71 @@ def main(argv=None) -> int:
                     except RokuError:
                         pass
             return 0
-    return _run_once(args, location, roku, ducker)
+    return _run_once(args, location, settings, roku, ducker)
+
+
+def serve_main(argv=None) -> int:
+    """Entry point for `python -m flight_noise serve` (the web dashboard)."""
+    from . import server  # local import keeps the base CLI lightweight
+
+    p = argparse.ArgumentParser(prog="flight-noise serve",
+                                description="Launch the flight-noise web dashboard.")
+    p.add_argument("-a", "--address", default=None)
+    p.add_argument("--lat", type=float)
+    p.add_argument("--lon", type=float)
+    p.add_argument("--elevation", type=float)
+    p.add_argument("-p", "--port", type=int, default=8000)
+    p.add_argument("--interval", type=float, default=8.0,
+                   help="Seconds between flight refreshes (default 8).")
+    p.add_argument("--bbox", type=float, default=0.25)
+    p.add_argument("--demo", action="store_true",
+                   help="Serve bundled sample data instead of live flights.")
+    p.add_argument("--roku-ip", default=None)
+    p.add_argument("--roku-dry-run", action="store_true",
+                   help="Log volume keypresses instead of sending them.")
+    p.add_argument("--no-duck", action="store_true",
+                   help="Start with auto reverse-ducking off (controls still work).")
+    p.add_argument("--duck-floor", type=float, default=DuckConfig.db_floor)
+    p.add_argument("--duck-ceiling", type=float, default=DuckConfig.db_ceiling)
+    p.add_argument("--duck-max-steps", type=int, default=DuckConfig.max_boost_steps)
+    p.add_argument("--duck-rate", type=int, default=DuckConfig.max_step_per_tick)
+    args = p.parse_args(argv)
+
+    settings = load_settings()
+    location = resolve_location(args, settings)
+
+    # Build a Roku client if we have any way to reach one, so the dashboard's
+    # controls and auto-duck are available.
+    roku = None
+    ip = args.roku_ip or settings.get("roku_ip")
+    if ip or args.roku_dry_run:
+        transport = None
+        if args.roku_dry_run:
+            transport = lambda key: print(f"[roku dry-run] keypress {key}")  # noqa: E731
+        roku = RokuTV(ip=ip or "0.0.0.0", transport=transport)
+
+    duck_cfg = DuckConfig(
+        db_floor=args.duck_floor, db_ceiling=args.duck_ceiling,
+        max_boost_steps=args.duck_max_steps, max_step_per_tick=args.duck_rate,
+    )
+
+    return server.serve(
+        location, port=args.port, demo=args.demo, interval=args.interval,
+        bbox=args.bbox, opensky=opensky_client(settings), roku=roku,
+        duck_config=duck_cfg, auto_duck=not args.no_duck,
+    )
+
+
+def dispatch(argv=None) -> int:
+    """Top-level dispatcher: `setup` / `serve` subcommands, else the estimator."""
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] == "setup":
+        from .setup_wizard import run_wizard
+        return run_wizard()
+    if argv and argv[0] == "serve":
+        return serve_main(argv[1:])
+    return main(argv)
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(dispatch())
