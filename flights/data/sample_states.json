@@ -1,0 +1,12 @@
+{
+  "time": 1718415000,
+  "_comment": "Sample OpenSky /states/all?extended=1 response near 5071 Lotus St, San Diego (Point Loma). State-vector fields: [icao24, callsign, origin_country, time_position, last_contact, lon, lat, baro_alt, on_ground, velocity, true_track, vertical_rate, sensors, geo_alt, squawk, spi, position_source, category].",
+  "states": [
+    ["a1b2c3", "SWA1234 ", "United States", 1718415000, 1718415000, -117.2405, 32.7460, 580, false, 92.5, 268.0, 12.5, null, 610, "1200", false, 0, 4],
+    ["d4e5f6", "UAL55   ", "United States", 1718415000, 1718415000, -117.2700, 32.7600, 6050, false, 235.0, 290.0, 6.0, null, 6100, "2244", false, 0, 6],
+    ["112233", "N12345  ", "United States", 1718415000, 1718415000, -117.2900, 32.7100, 1480, false, 58.0, 110.0, 0.5, null, 1500, "1200", false, 0, 2],
+    ["445566", "SKW45   ", "United States", 1718415000, 1718415000, -117.3200, 32.7000, 1180, false, 105.0, 95.0, -5.5, null, 1200, "3311", false, 0, 3],
+    ["778899", "DAL9    ", "United States", 1718415000, 1718415000, -117.1000, 32.6500, 10900, false, 250.0, 80.0, 0.0, null, 11000, "4455", false, 0, 6],
+    ["aabbcc", "HEMS3   ", "United States", 1718415000, 1718415000, -117.2440, 32.7430, 300, false, 40.0, 200.0, -1.0, null, 320, "1200", false, 0, 8]
+  ]
+}

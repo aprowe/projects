@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>COOL RANCH ✈ Flight Noise — SWEEPSTAKES!</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  /* ---- Cool Ranch palette (parody fan theme, recreated — not official art) ---- */
+  :root {
+    --cr-blue:#0e3aa8; --cr-blue-deep:#061a52; --cr-blue-mid:#1452d6;
+    --cr-red:#e2231a; --cr-orange:#ff8a00; --cr-yellow:#ffd200;
+    --cream:#fff7e6; --chip:#f2dd9b; --line:#2c54b8;
+    --panel:rgba(6,26,82,.86); --txt:#fff7e6; --muted:#b9cdfb; --accent:#ffd200;
+  }
+  * { box-sizing:border-box; }
+  html,body { margin:0; }
+  body {
+    font:14px/1.45 "Trebuchet MS",system-ui,sans-serif; color:var(--txt);
+    background:
+      repeating-linear-gradient(60deg, rgba(255,255,255,.045) 0 2px, transparent 2px 46px),
+      repeating-linear-gradient(-60deg, rgba(255,255,255,.045) 0 2px, transparent 2px 46px),
+      radial-gradient(circle at 20% 0%, var(--cr-blue-mid), transparent 55%),
+      radial-gradient(circle at 100% 100%, var(--cr-red) -10%, transparent 45%),
+      linear-gradient(160deg, var(--cr-blue) 0%, var(--cr-blue-deep) 100%);
+    background-attachment:fixed;
+    padding:0 120px; min-height:100vh; overflow-x:hidden;
+  }
+  h1,h2 { font-family:"Arial Black","Arial",sans-serif; }
+
+  /* ---- Sweepstakes marquee ---- */
+  .sweep { background:linear-gradient(90deg,var(--cr-red),var(--cr-orange),var(--cr-yellow),var(--cr-orange),var(--cr-red));
+    color:#240; font-weight:900; overflow:hidden; white-space:nowrap; border-bottom:3px solid #240; }
+  .sweep-track { display:inline-block; padding:7px 0; animation:scroll 22s linear infinite; text-shadow:0 1px 0 #fff6; letter-spacing:.5px; }
+  @keyframes scroll { from{transform:translateX(100vw)} to{transform:translateX(-100%)} }
+
+  /* ---- Brand header ---- */
+  header.brand { display:flex; align-items:center; gap:18px; padding:14px 20px; flex-wrap:wrap;
+    border-bottom:4px solid var(--cr-yellow); background:rgba(6,26,82,.55); }
+  .logo-badge { position:relative; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    padding:10px 26px; background:linear-gradient(135deg,var(--cr-red),#a3140d);
+    clip-path:polygon(8% 0,100% 0,92% 100%,0 100%); box-shadow:0 6px 0 #5c0a05, 0 10px 22px #0008;
+    transform:rotate(-2deg); }
+  .logo-badge .word { font-family:"Arial Black",sans-serif; font-style:italic; font-weight:900;
+    font-size:34px; letter-spacing:1px; color:#fff; text-shadow:2px 2px 0 #5c0a05, -1px -1px 0 #ffd20055; line-height:.9; }
+  .logo-badge .word b { color:var(--cr-yellow); }
+  .logo-badge .tag { font-weight:900; font-size:12px; letter-spacing:3px; color:#fff; margin-top:2px; }
+  #reallogo { max-height:64px; }
+  .brand .title { font-size:18px; font-weight:900; text-shadow:2px 2px 0 #000a; }
+  .brand .title small { display:block; color:var(--cr-yellow); font-size:12px; letter-spacing:2px; }
+  .addrform { display:flex; gap:6px; align-items:center; }
+  .addrform input { width:260px; max-width:42vw; padding:9px 12px; border-radius:10px; border:3px solid var(--cr-yellow);
+    background:#06143f; color:var(--cream); font-size:14px; font-weight:700; }
+  .addrform input::placeholder { color:#8fa8e8; font-weight:400; }
+  .addrform button { padding:9px 12px; }
+  header.brand .addr { color:var(--cream); }
+  header.brand .badge { margin-left:auto; font-weight:900; background:var(--cr-yellow); color:#240;
+    padding:5px 12px; border-radius:20px; transform:rotate(2deg); box-shadow:0 3px 0 #c9a600; }
+  #err { color:#ffd200; font-weight:700; min-height:1em; padding:4px 20px; text-shadow:1px 1px 0 #000; }
+
+  /* ---- Flashing gutter ads ---- */
+  .gutter { position:fixed; top:0; bottom:0; width:110px; z-index:50; display:flex; flex-direction:column;
+    gap:10px; padding:10px 8px; align-items:center; justify-content:center; }
+  .gutter.left { left:0; } .gutter.right { right:0; }
+  .ad { width:96px; border-radius:10px; padding:12px 6px; text-align:center; font-weight:900; cursor:pointer;
+    color:#fff; line-height:1.05; border:3px dashed #fff; text-shadow:1px 1px 0 #000a; transform:rotate(-3deg);
+    box-shadow:0 4px 14px #0007; }
+  .ad small { display:block; font-size:10px; font-weight:700; }
+  .ad.a1 { animation:flash1 .8s steps(1) infinite; }
+  .ad.a2 { animation:flash2 .6s steps(1) infinite; transform:rotate(3deg); }
+  .ad.a3 { animation:zoom 1.1s ease-in-out infinite; background:#240; }
+  @keyframes flash1 { 0%{background:var(--cr-red)} 50%{background:var(--cr-orange)} }
+  @keyframes flash2 { 0%{background:#0a8a3c} 50%{background:var(--cr-yellow); color:#240} }
+  @keyframes zoom  { 0%,100%{transform:rotate(-2deg) scale(1)} 50%{transform:rotate(2deg) scale(1.12)} }
+
+  /* ---- Floating Dorito sprites (decorative, non-interactive) ---- */
+  .sprites { position:fixed; inset:0; pointer-events:none; z-index:40; overflow:hidden; }
+  .sprite { position:absolute; opacity:.9; filter:drop-shadow(0 6px 8px #0006); }
+  .bag { width:74px; } .bag.b1{left:6%;animation:bob 6s ease-in-out infinite}
+  .bag.b2{right:8%;top:40%;animation:bob 7.5s ease-in-out .8s infinite}
+  .bag.b3{left:14%;bottom:8%;animation:spinbob 9s linear infinite}
+  .chip-sprite { width:48px; height:42px; clip-path:polygon(50% 0,100% 100%,0 100%);
+    background:radial-gradient(circle at 30% 35%, #6fe0c0 0 3px, transparent 4px),
+              radial-gradient(circle at 62% 55%, #3a86ff 0 3px, transparent 4px),
+              radial-gradient(circle at 45% 75%, #2bb673 0 2px, transparent 3px),
+              linear-gradient(160deg,#f6e6a8,#e7c96a);
+    border-bottom:0; }
+  .c1{top:18%;right:18%;animation:drift 14s linear infinite}
+  .c2{bottom:22%;left:42%;animation:drift 18s linear infinite reverse}
+  .c3{top:55%;left:24%;animation:spin 8s linear infinite}
+  @keyframes bob { 0%,100%{transform:translateY(0) rotate(-4deg)} 50%{transform:translateY(-22px) rotate(4deg)} }
+  @keyframes spinbob { 0%{transform:translateY(0) rotate(0)} 50%{transform:translateY(-16px) rotate(180deg)} 100%{transform:translateY(0) rotate(360deg)} }
+  @keyframes spin { to{transform:rotate(360deg)} }
+  @keyframes drift { 0%{transform:translateX(0) rotate(0)} 50%{transform:translateX(40px) rotate(25deg)} 100%{transform:translateX(0) rotate(0)} }
+
+  /* ---- Dashboard grid + cards ---- */
+  .grid { display:grid; grid-template-columns:1.4fr 1fr; gap:16px; padding:16px; position:relative; z-index:10; }
+  .card { background:var(--panel); border:3px solid var(--cr-yellow); border-radius:14px; padding:14px;
+    box-shadow:0 8px 0 #06143f, 0 12px 30px #0007; backdrop-filter:blur(2px); }
+  .card h2 { font-size:13px; text-transform:uppercase; letter-spacing:.08em; color:var(--cr-yellow);
+    margin:0 0 10px; text-shadow:1px 1px 0 #000a; }
+  #map { height:420px; border-radius:10px; border:3px solid var(--cr-red); }
+  #chart-wrap { height:240px; }
+  .map-card { grid-row:span 2; }
+  .big { font-size:40px; font-weight:900; color:var(--cr-yellow); text-shadow:2px 2px 0 #000a; }
+  .big small { font-size:14px; color:var(--cream); font-weight:700; }
+  .loud-desc { color:var(--cream); margin-top:4px; min-height:1.2em; }
+  .tv-row { display:flex; align-items:center; gap:8px; margin:8px 0; }
+  .tv-meter { flex:1; height:14px; background:#06143f; border-radius:8px; overflow:hidden; border:1px solid var(--line); }
+  .tv-meter > div { height:100%; background:linear-gradient(90deg,var(--cr-orange),var(--cr-yellow)); width:0; transition:width .4s; }
+  button { background:linear-gradient(180deg,var(--cr-red),#a3140d); color:#fff; border:2px solid #fff;
+    border-radius:10px; padding:9px 13px; font-size:14px; font-weight:900; cursor:pointer; text-shadow:1px 1px 0 #000a;
+    box-shadow:0 4px 0 #5c0a05; }
+  button:hover { filter:brightness(1.1); } button:active { transform:translateY(3px); box-shadow:0 1px 0 #5c0a05; }
+  button:disabled { opacity:.4; cursor:not-allowed; }
+  .controls { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
+  .toggle { display:flex; align-items:center; gap:8px; margin-top:12px; color:var(--cream); font-weight:700; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th,td { text-align:left; padding:6px; border-bottom:1px solid var(--line); }
+  th { color:var(--cr-yellow); }
+  td.dba { font-weight:900; text-align:right; }
+  .pill { font-size:11px; font-weight:900; padding:2px 9px; border-radius:12px; background:#06143f; color:var(--muted); }
+  .pill.on { background:#0a8a3c; color:#eafff0; } .pill.off { background:var(--cr-red); color:#fff; }
+  footer { text-align:center; color:#c7d6ff; font-size:11px; padding:18px 24px 28px; position:relative; z-index:10; opacity:.85; }
+  @media (max-width:1100px){ body{padding:0} .gutter{display:none} .grid{grid-template-columns:1fr} .map-card{grid-row:auto} }
+</style>
+</head>
+<body>
+
+<!-- Sweepstakes marquee -->
+<div class="sweep"><div class="sweep-track">
+  🔺 ENTER THE COOL RANCH&trade; SWEEPSTAKES — WIN A YEAR OF DORITOS! 🔺 EVERY PLANE = ONE ENTRY! 🔺 GET CRUNCHIN' 🔺 NO PURCHASE NECESSARY* 🔺 COOL RANCH&trade; — OFFICIAL SNACK OF OVERHEAD JETS 🔺 ENTER THE COOL RANCH&trade; SWEEPSTAKES — WIN A YEAR OF DORITOS! 🔺
+</div></div>
+
+<!-- Brand header -->
+<header class="brand">
+  <!-- Drop a real logo at flights/flight_noise/web/logo.png to show it here; otherwise the recreated wordmark shows. -->
+  <img id="reallogo" src="/static/logo.png" alt="" onerror="this.remove()" />
+  <div class="logo-badge"><span class="word">D<b>▲</b>RIT<b>▲</b>S</span><span class="tag">COOL RANCH</span></div>
+  <div class="title">FLIGHT NOISE<small>POWERED BY COOL RANCH&trade;*</small></div>
+  <form id="addrform" class="addrform">
+    <input id="addrinput" type="text" placeholder="Enter an address to monitor…" autocomplete="off" />
+    <button type="submit">📍 GO</button>
+    <button type="button" id="addrreset" title="Reset to the default address">↺ Lotus St</button>
+  </form>
+  <span class="addr" id="addr">…</span>
+  <span class="badge" id="badge"></span>
+</header>
+<div id="err"></div>
+
+<!-- Flashing gutter ads -->
+<aside class="gutter left">
+  <div class="ad a1">CLICK<br>HERE!<small>you won't*</small></div>
+  <div class="ad a2">FREE<br>NACHO<br>CHEESE<small>act now</small></div>
+  <div class="ad a3">🔺🔺🔺<br>CRUNCH<br>🔺🔺🔺</div>
+</aside>
+<aside class="gutter right">
+  <div class="ad a2">100,000<br>BAGS!<small>maybe</small></div>
+  <div class="ad a1">RANCH<br>O'CLOCK<small>it's time</small></div>
+  <div class="ad a3">▲ WIN ▲<br>BIG<br>▲▲▲</div>
+</aside>
+
+<!-- Floating Dorito sprites -->
+<div class="sprites" id="sprites"></div>
+
+<div class="grid">
+  <div class="card map-card">
+    <h2>🛰 Live radar (sponsored by Cool Ranch&trade;)</h2>
+    <div id="map"></div>
+  </div>
+
+  <div class="card">
+    <h2>📢 Loudest jet right now</h2>
+    <div class="big"><span id="louddba">—</span> <small>dBA</small> &nbsp; <span class="pill" id="loudcs"></span></div>
+    <div class="loud-desc" id="louddesc"></div>
+    <div style="margin-top:10px; color:var(--cream)">Combined audible: <b id="combined">—</b> dBA</div>
+  </div>
+
+  <div class="card">
+    <h2>📺 Roku TV — Cool Ranch&trade; volume boost</h2>
+    <div id="tvstatus" style="color:var(--cream); margin-bottom:6px;"></div>
+    <div class="tv-row">
+      <span style="color:var(--cream); font-weight:900">BOOST</span>
+      <div class="tv-meter"><div id="tvbar"></div></div>
+      <span id="tvoffset" style="min-width:54px; text-align:right; font-weight:900;">+0/12</span>
+    </div>
+    <div class="controls">
+      <button data-roku="volume_down">VOL −</button>
+      <button data-roku="volume_up">VOL +</button>
+      <button data-roku="mute">MUTE</button>
+    </div>
+    <label class="toggle"><input type="checkbox" id="autoduck" /> 🔊 Auto reverse-duck (CRANK IT when a jet roars over)</label>
+  </div>
+
+  <div class="card" style="grid-column:1 / -1;">
+    <h2>📈 Volume &amp; loudness — LIVE!</h2>
+    <div id="chart-wrap"><canvas id="chart"></canvas></div>
+  </div>
+
+  <div class="card" style="grid-column:1 / -1;">
+    <h2>✈ Aircraft in range</h2>
+    <table>
+      <thead><tr><th>Callsign</th><th>dBA</th><th>Alt (ft)</th><th>Slant (ft)</th><th>Perceived</th></tr></thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+</div>
+
+<footer>
+  Parody fan project for personal use. Not affiliated with, sponsored by, or endorsed by Frito-Lay or PepsiCo.
+  DORITOS&reg; and COOL RANCH&reg; are trademarks of their owner. *There is no sweepstakes. No purchase necessary because nothing is for sale.
+</footer>
+
+<script>
+// Recognisable Cool-Ranch-blue chip bag, recreated as inline SVG (no external art).
+const BAG_SVG = `
+<svg class="bag" viewBox="0 0 80 110" xmlns="http://www.w3.org/2000/svg">
+  <defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#2f6bf0"/><stop offset="1" stop-color="#0a2f8f"/></linearGradient></defs>
+  <path d="M8 16 L72 16 L67 104 Q40 111 13 104 Z" fill="url(#bg)" stroke="#06205e" stroke-width="2"/>
+  <path d="M6 16 l8 -7 l8 7 l8 -7 l8 7 l8 -7 l8 7 l8 -7 l8 7" fill="none" stroke="#bcd4ff" stroke-width="3"/>
+  <polygon points="40,32 58,70 22,70" fill="#ffd84d" stroke="#e2231a" stroke-width="2"/>
+  <text x="40" y="90" text-anchor="middle" font-family="Arial Black,Arial" font-style="italic"
+        font-size="11" font-weight="900" fill="#fff">COOL RANCH</text>
+</svg>`;
+
+(function buildSprites(){
+  const wrap = document.getElementById("sprites");
+  wrap.innerHTML =
+    `<div class="sprite bag b1">${BAG_SVG}</div>`
+    + `<div class="sprite bag b2">${BAG_SVG}</div>`
+    + `<div class="sprite bag b3">${BAG_SVG}</div>`
+    + `<div class="sprite chip-sprite c1"></div>`
+    + `<div class="sprite chip-sprite c2"></div>`
+    + `<div class="sprite chip-sprite c3"></div>`;
+})();
+
+let map, addrMarker, planeLayer, chart;
+let curCenter = { lat: null, lon: null };
+let defaultLocation = null;
+
+function dbaColor(d) {
+  if (d == null) return "#555";
+  if (d < 45) return "#7fa8e0";
+  if (d < 65) return "#3a9bd6";
+  if (d < 75) return "#ffd200";
+  if (d < 85) return "#ff8a00";
+  return "#e2231a";
+}
+
+function initMap(lat, lon) {
+  map = L.map("map").setView([lat, lon], 12);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+    { maxZoom: 18, attribution: "© OpenStreetMap" }).addTo(map);
+  addrMarker = L.marker([lat, lon]).addTo(map).bindPopup("Listener");
+  planeLayer = L.layerGroup().addTo(map);
+}
+
+function initChart() {
+  const ctx = document.getElementById("chart").getContext("2d");
+  chart = new Chart(ctx, {
+    type: "line",
+    data: { datasets: [
+      { label: "Loudest (dBA)", yAxisID: "y", borderColor: "#e2231a", backgroundColor:"#e2231a33", tension:.25, spanGaps:true, pointRadius:0 },
+      { label: "Combined (dBA)", yAxisID: "y", borderColor: "#69b3ff", backgroundColor:"#69b3ff22", tension:.25, spanGaps:true, pointRadius:0 },
+      { label: "TV boost (steps)", yAxisID: "y1", borderColor: "#ffd200", backgroundColor:"#ffd20033", tension:.1, stepped:true, pointRadius:0 },
+    ]},
+    options: {
+      animation:false, responsive:true, maintainAspectRatio:false,
+      scales: {
+        x: { type:"time", time:{ unit:"minute" }, ticks:{ color:"#dbe6ff" }, grid:{ color:"#2c54b8" } },
+        y: { position:"left", title:{display:true,text:"dBA",color:"#ffd200"}, ticks:{ color:"#dbe6ff" }, grid:{ color:"#2c54b8" }, suggestedMin:40, suggestedMax:100 },
+        y1:{ position:"right", title:{display:true,text:"steps",color:"#ffd200"}, ticks:{ color:"#dbe6ff" }, grid:{ drawOnChartArea:false }, suggestedMin:0 },
+      },
+      plugins:{ legend:{ labels:{ color:"#fff7e6", font:{weight:"bold"} } } }
+    }
+  });
+}
+
+function updateChart(history) {
+  chart.data.datasets[0].data = history.map(h => ({x:h.t, y:h.loudest_dba}));
+  chart.data.datasets[1].data = history.map(h => ({x:h.t, y:h.combined_dba}));
+  chart.data.datasets[2].data = history.map(h => ({x:h.t, y:h.volume_offset}));
+  chart.update();
+}
+
+function updatePlanes(planes) {
+  planeLayer.clearLayers();
+  planes.forEach(p => {
+    if (p.lat == null || p.lon == null) return;
+    const m = L.circleMarker([p.lat, p.lon], {
+      radius: p.audible ? 9 : 6, color:"#0008", weight:1,
+      fillColor: dbaColor(p.dba), fillOpacity: p.audible ? 0.95 : 0.5,
+    }).bindPopup(`<b>${p.callsign}</b><br>${p.dba} dBA — ${p.description}<br>${p.altitude_ft} ft, ${p.slant_ft} ft slant`);
+    if (p.audible) m.bindTooltip(`${p.callsign} ${p.dba}dBA`, {permanent:true, direction:"top", className:"plane-tip"});
+    m.addTo(planeLayer);
+  });
+}
+
+function updateTable(planes) {
+  document.getElementById("tbody").innerHTML = planes.map(p =>
+    `<tr><td>${p.callsign}</td><td class="dba" style="color:${dbaColor(p.dba)}">${p.dba}</td>`
+    + `<td>${p.altitude_ft.toLocaleString()}</td><td>${p.slant_ft.toLocaleString()}</td>`
+    + `<td style="color:var(--cream)">${p.audible ? p.description : "inaudible"}</td></tr>`).join("");
+}
+
+function updateTV(roku) {
+  const st = document.getElementById("tvstatus");
+  if (!roku.configured) { st.innerHTML = `<span class="pill off">no TV configured</span> run <code>python3 -m flight_noise setup</code>`; }
+  else { st.innerHTML = `<span class="pill on">connected</span> ${roku.ip || ""}`; }
+  const pct = roku.max_steps ? (100 * roku.offset / roku.max_steps) : 0;
+  document.getElementById("tvbar").style.width = Math.max(0, pct) + "%";
+  document.getElementById("tvoffset").textContent = `+${roku.offset}/${roku.max_steps}`;
+  document.getElementById("autoduck").checked = roku.auto_duck;
+  document.querySelectorAll("[data-roku]").forEach(b => b.disabled = !roku.configured);
+}
+
+async function refresh() {
+  let s;
+  try { s = await (await fetch("/api/state")).json(); }
+  catch (e) { document.getElementById("err").textContent = "dashboard offline: " + e; return; }
+
+  defaultLocation = s.default_location;
+  document.getElementById("addr").textContent = s.location.address;
+  document.getElementById("badge").textContent =
+    (s.demo ? "DEMO DATA" : "LIVE") + " · " + s.planes.length + " jets = " + s.planes.length + " entries!";
+  document.getElementById("err").textContent = s.error || "";
+
+  if (!map) initMap(s.location.lat, s.location.lon);
+  if (!chart) initChart();
+
+  // Recenter when the monitored location changes.
+  if (s.location.lat != null && (s.location.lat !== curCenter.lat || s.location.lon !== curCenter.lon)) {
+    curCenter = { lat: s.location.lat, lon: s.location.lon };
+    addrMarker.setLatLng([s.location.lat, s.location.lon]);
+    map.setView([s.location.lat, s.location.lon]);
+  }
+
+  const loud = s.loudest;
+  document.getElementById("louddba").textContent = loud ? loud.dba.toFixed(1) : "—";
+  document.getElementById("loudcs").textContent = loud ? loud.callsign : "";
+  document.getElementById("louddesc").textContent = loud ? loud.description : "nothing audible overhead";
+  document.getElementById("combined").textContent = s.combined_dba != null ? s.combined_dba : "—";
+
+  updatePlanes(s.planes);
+  updateTable(s.planes);
+  updateChart(s.history);
+  updateTV(s.roku);
+}
+
+document.querySelectorAll("[data-roku]").forEach(btn => {
+  btn.addEventListener("click", async () => {
+    await fetch("/api/roku/" + btn.dataset.roku, { method:"POST" });
+    refresh();
+  });
+});
+document.getElementById("autoduck").addEventListener("change", async (e) => {
+  await fetch("/api/duck/" + (e.target.checked ? "on" : "off"), { method:"POST" });
+  refresh();
+});
+
+async function setLocation(payload) {
+  document.getElementById("err").textContent = "";
+  try {
+    const r = await (await fetch("/api/location", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    })).json();
+    if (!r.ok) document.getElementById("err").textContent = "address error: " + r.error;
+    else document.getElementById("addrinput").value = "";
+  } catch (err) {
+    document.getElementById("err").textContent = "address error: " + err;
+  }
+  refresh();
+}
+
+document.getElementById("addrform").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const address = document.getElementById("addrinput").value.trim();
+  if (address) setLocation({ address });
+});
+
+// Reset to the built-in default (5071 Lotus Street). Uses its lat/lon so it
+// works even offline, without depending on the geocoder.
+document.getElementById("addrreset").addEventListener("click", () => {
+  if (defaultLocation) setLocation(defaultLocation);
+});
+
+refresh();
+setInterval(refresh, 4000);
+</script>
+</body>
+</html>
