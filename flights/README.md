@@ -146,6 +146,18 @@ POSTs to `/api/roku/*` and `/api/duck/*`. (The map and chart load Leaflet and
 Chart.js from a CDN, so the browser needs internet; the server itself is
 stdlib-only.) Use `--roku-dry-run` to drive the controls without a real TV.
 
+### Cool Ranch theme
+
+The dashboard ships with an over-the-top "Cool Ranch" sponsorship skin — a
+scrolling sweepstakes marquee, flashing gutter ads, floating chip-bag sprites,
+and a triangular-chip background. The branding is **recreated with inline
+SVG/CSS** (no external image files), so it works fully offline.
+
+It's a parody/personal skin (note the footer disclaimer) — it is *not* an actual
+sponsorship and there is no real sweepstakes. To show a real logo image instead
+of the recreated wordmark, drop a file at `flight_noise/web/logo.png`; the server
+serves it at `/static/logo.png` and the header picks it up automatically.
+
 ## Reverse-ducking a Roku TV
 
 When a plane gets loud overhead it *masks* your TV audio. With `--roku`, the tool

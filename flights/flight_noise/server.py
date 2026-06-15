@@ -11,6 +11,7 @@ The browser polls ``/api/state`` for JSON and POSTs to ``/api/roku/*`` and
 from __future__ import annotations
 
 import json
+import mimetypes
 import os
 import threading
 import time
@@ -190,6 +191,21 @@ def make_handler(state: DashboardState):
                     self._send(500, "dashboard html missing", "text/plain")
             elif self.path == "/api/state":
                 self._send(200, json.dumps(state.state_json()))
+            elif self.path.startswith("/static/"):
+                self._serve_static()
+            else:
+                self._send(404, json.dumps({"error": "not found"}))
+
+        def _serve_static(self):
+            # Serve image assets the user drops into the web/ folder (e.g. a
+            # real logo at web/logo.png -> /static/logo.png). Basename only.
+            name = os.path.basename(self.path.split("?", 1)[0])
+            fp = os.path.join(WEB_DIR, name)
+            allowed = (".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp")
+            if os.path.isfile(fp) and name.lower().endswith(allowed):
+                ctype = mimetypes.guess_type(fp)[0] or "application/octet-stream"
+                with open(fp, "rb") as f:
+                    self._send(200, f.read(), ctype)
             else:
                 self._send(404, json.dumps({"error": "not found"}))
 
