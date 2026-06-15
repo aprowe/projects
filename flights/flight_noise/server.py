@@ -18,7 +18,7 @@ import time
 from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from .config import Location, default_location
+from .config import DEFAULT_ADDRESS, DEFAULT_LAT, DEFAULT_LON, Location, default_location
 from .ducker import DuckConfig, VolumeDucker
 from .estimator import estimate_from_states_file, estimate_live
 from .opensky import OpenSkyClient, OpenSkyError
@@ -120,6 +120,11 @@ class DashboardState:
                 "address": self.location.address,
                 "lat": self.location.lat,
                 "lon": self.location.lon,
+            },
+            "default_location": {
+                "address": DEFAULT_ADDRESS,
+                "lat": DEFAULT_LAT,
+                "lon": DEFAULT_LON,
             },
             "planes": planes,
             "loudest": ({"callsign": loud.callsign, "dba": loud.dba,

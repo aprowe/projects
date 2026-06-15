@@ -143,6 +143,7 @@
   <form id="addrform" class="addrform">
     <input id="addrinput" type="text" placeholder="Enter an address to monitor…" autocomplete="off" />
     <button type="submit">📍 GO</button>
+    <button type="button" id="addrreset" title="Reset to the default address">↺ Lotus St</button>
   </form>
   <span class="addr" id="addr">…</span>
   <span class="badge" id="badge"></span>
@@ -238,6 +239,7 @@ const BAG_SVG = `
 
 let map, addrMarker, planeLayer, chart;
 let curCenter = { lat: null, lon: null };
+let defaultLocation = null;
 
 function dbaColor(d) {
   if (d == null) return "#555";
@@ -320,6 +322,7 @@ async function refresh() {
   try { s = await (await fetch("/api/state")).json(); }
   catch (e) { document.getElementById("err").textContent = "dashboard offline: " + e; return; }
 
+  defaultLocation = s.default_location;
   document.getElementById("addr").textContent = s.location.address;
   document.getElementById("badge").textContent =
     (s.demo ? "DEMO DATA" : "LIVE") + " · " + s.planes.length + " jets = " + s.planes.length + " entries!";
@@ -358,26 +361,31 @@ document.getElementById("autoduck").addEventListener("change", async (e) => {
   refresh();
 });
 
-document.getElementById("addrform").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const input = document.getElementById("addrinput");
-  const address = input.value.trim();
-  if (!address) return;
-  const btn = e.target.querySelector("button");
-  btn.disabled = true; btn.textContent = "…";
+async function setLocation(payload) {
   document.getElementById("err").textContent = "";
   try {
     const r = await (await fetch("/api/location", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ address }),
+      body: JSON.stringify(payload),
     })).json();
-    if (!r.ok) { document.getElementById("err").textContent = "address error: " + r.error; }
-    else { input.value = ""; }
+    if (!r.ok) document.getElementById("err").textContent = "address error: " + r.error;
+    else document.getElementById("addrinput").value = "";
   } catch (err) {
     document.getElementById("err").textContent = "address error: " + err;
   }
-  btn.disabled = false; btn.textContent = "📍 GO";
   refresh();
+}
+
+document.getElementById("addrform").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const address = document.getElementById("addrinput").value.trim();
+  if (address) setLocation({ address });
+});
+
+// Reset to the built-in default (5071 Lotus Street). Uses its lat/lon so it
+// works even offline, without depending on the geocoder.
+document.getElementById("addrreset").addEventListener("click", () => {
+  if (defaultLocation) setLocation(defaultLocation);
 });
 
 refresh();
