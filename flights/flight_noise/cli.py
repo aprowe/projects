@@ -8,6 +8,7 @@ import sys
 import time
 
 from .config import DEFAULT_ADDRESS, default_location
+from .ducker import DuckConfig, VolumeDucker
 from .estimator import (
     Snapshot,
     estimate_from_states_file,
@@ -15,6 +16,7 @@ from .estimator import (
 )
 from .geocode import geocode
 from .opensky import OpenSkyClient, OpenSkyError
+from .roku import RokuError, RokuTV
 
 SAMPLE_PATH = os.path.join(os.path.dirname(__file__), os.pardir, "data", "sample_states.json")
 
@@ -74,6 +76,27 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Use bundled sample data instead of the live API (offline).")
     p.add_argument("--watch", type=float, metavar="SECONDS", default=None,
                    help="Refresh continuously every SECONDS.")
+
+    g = p.add_argument_group("Roku reverse-ducking")
+    g.add_argument("--roku", action="store_true",
+                   help="Boost a Roku TV's volume while a plane is loud, then "
+                        "smoothly restore it (best with --watch).")
+    g.add_argument("--roku-ip", default=None,
+                   help="Roku TV IP address (else ROKU_IP env, else SSDP discovery).")
+    g.add_argument("--roku-dry-run", action="store_true",
+                   help="Print volume keypresses instead of sending them.")
+    g.add_argument("--duck-floor", type=float, default=DuckConfig.db_floor,
+                   help=f"dBA at/below which no boost is applied "
+                        f"(default {DuckConfig.db_floor:.0f}).")
+    g.add_argument("--duck-ceiling", type=float, default=DuckConfig.db_ceiling,
+                   help=f"dBA at/above which full boost is applied "
+                        f"(default {DuckConfig.db_ceiling:.0f}).")
+    g.add_argument("--duck-max-steps", type=int, default=DuckConfig.max_boost_steps,
+                   help=f"Max volume steps above baseline "
+                        f"(default {DuckConfig.max_boost_steps}).")
+    g.add_argument("--duck-rate", type=int, default=DuckConfig.max_step_per_tick,
+                   help=f"Max volume steps changed per refresh "
+                        f"(default {DuckConfig.max_step_per_tick}).")
     return p
 
 
@@ -89,7 +112,53 @@ def _resolve_location(args):
     return loc
 
 
-def _run_once(args, location) -> int:
+def _setup_roku(args):
+    """Build (RokuTV, VolumeDucker) if --roku is set, else (None, None)."""
+    if not args.roku:
+        return None, None
+
+    transport = None
+    if args.roku_dry_run:
+        transport = lambda key: print(f"    [roku dry-run] keypress {key}")  # noqa: E731
+
+    ip = args.roku_ip or os.getenv("ROKU_IP")
+    if not ip and not args.roku_dry_run:
+        print("Discovering Roku via SSDP...", file=sys.stderr)
+        ip = RokuTV.discover()
+        if not ip:
+            print("error: no Roku found; set --roku-ip or ROKU_IP.", file=sys.stderr)
+            raise SystemExit(2)
+        print(f"Found Roku at {ip}", file=sys.stderr)
+
+    roku = RokuTV(ip=ip or "0.0.0.0", transport=transport)
+    cfg = DuckConfig(
+        db_floor=args.duck_floor,
+        db_ceiling=args.duck_ceiling,
+        max_boost_steps=args.duck_max_steps,
+        max_step_per_tick=args.duck_rate,
+    )
+    return roku, VolumeDucker(cfg)
+
+
+def _apply_duck(roku, ducker, snap) -> None:
+    """Nudge the Roku volume toward the level the loudest plane calls for."""
+    loud = snap.loudest
+    dba = loud.dba if (loud and loud.audible) else None
+    delta = ducker.update(dba)
+    try:
+        roku.apply_delta(delta)
+    except RokuError as e:
+        print(f"  Roku: control failed: {e}", file=sys.stderr)
+        return
+    arrow = "+" if delta > 0 else ("" if delta == 0 else "-")
+    target = ducker.target_steps(dba)
+    src = f"{dba:.1f} dBA ({loud.callsign})" if dba is not None else "quiet"
+    print(f"  Roku reverse-duck: {arrow}{abs(delta)} step(s) -> "
+          f"offset +{ducker.applied}/{ducker.cfg.max_boost_steps} "
+          f"(target +{target}, source {src})")
+
+
+def _run_once(args, location, roku=None, ducker=None) -> int:
     try:
         if args.demo:
             snap = estimate_from_states_file(location, os.path.abspath(SAMPLE_PATH))
@@ -104,12 +173,16 @@ def _run_once(args, location) -> int:
         print(f"error: {e}", file=sys.stderr)
         return 2
     print(_format_snapshot(snap, args.top, args.verbose))
+    if roku is not None and ducker is not None:
+        print()
+        _apply_duck(roku, ducker, snap)
     return 0
 
 
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
     location = _resolve_location(args)
+    roku, ducker = _setup_roku(args)
 
     if args.watch:
         try:
@@ -117,11 +190,20 @@ def main(argv=None) -> int:
                 print("\033[2J\033[H", end="")  # clear screen
                 print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}]  refreshing every {args.watch}s "
                       f"(Ctrl-C to quit)\n")
-                _run_once(args, location)
+                _run_once(args, location, roku, ducker)
                 time.sleep(args.watch)
         except KeyboardInterrupt:
+            # Restore the TV to its baseline volume before exiting.
+            if roku is not None and ducker is not None:
+                restore = ducker.reset()
+                if restore:
+                    print(f"\nRestoring Roku volume ({restore:+d} steps)...")
+                    try:
+                        roku.apply_delta(restore)
+                    except RokuError:
+                        pass
             return 0
-    return _run_once(args, location)
+    return _run_once(args, location, roku, ducker)
 
 
 if __name__ == "__main__":

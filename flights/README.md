@@ -97,6 +97,44 @@ When several aircraft are audible, the combined level is computed by **incoheren
 > data, terrain shadowing, wind, temperature gradients, and reflections. Treat it
 > as a physically-reasonable approximation, not a regulatory sound reading.
 
+## Reverse-ducking a Roku TV
+
+When a plane gets loud overhead it *masks* your TV audio. With `--roku`, the tool
+**boosts the Roku's volume to compensate, then smoothly ramps it back down** as
+the plane passes — a "reverse duck" (a normal duck lowers a source; this raises
+it). Works best paired with `--watch`.
+
+Roku TVs are controlled over the [External Control Protocol](https://developer.roku.com/docs/developer-program/dev-tools/external-control-api.md)
+(HTTP on port 8060). They only support *relative* `VolumeUp`/`VolumeDown`
+keypresses, so the tool tracks an offset relative to your current volume and
+always restores it on exit (Ctrl-C).
+
+```bash
+# Try it offline first — prints the volume keypresses instead of sending them:
+python3 -m flight_noise --demo --roku --roku-dry-run --watch 3
+
+# For real, against your TV (auto-discovers via SSDP, or pass --roku-ip):
+python3 -m flight_noise --watch 10 --roku --roku-ip 192.168.1.23
+```
+
+How the boost is chosen (all tunable):
+
+| Flag | Default | Meaning |
+|------|---------|---------|
+| `--duck-floor` | 60 dBA | at/below this, no boost |
+| `--duck-ceiling` | 95 dBA | at/above this, full boost |
+| `--duck-max-steps` | 12 | most volume steps it will add above baseline |
+| `--duck-rate` | 2 | max steps changed per refresh (controls how *smooth*) |
+
+The desired boost scales linearly between the floor and ceiling based on the
+loudest audible aircraft; each refresh the applied offset moves toward that
+target by at most `--duck-rate` steps, so the volume eases up and down rather
+than jumping. Smaller `--watch` intervals + a modest `--duck-rate` give the
+smoothest ramp.
+
+> Set `ROKU_IP` in your environment to skip discovery. The TV and the machine
+> running this must be on the same LAN.
+
 ## Project layout
 
 ```
@@ -107,6 +145,8 @@ flights/
 │   ├── geocode.py     # address -> lat/lon (Nominatim, with fallback)
 │   ├── config.py      # default address & search box
 │   ├── estimator.py   # fetch + rank into a Snapshot
+│   ├── roku.py        # Roku TV ECP client (relative volume + SSDP discovery)
+│   ├── ducker.py      # loudness -> smooth volume-offset controller
 │   └── cli.py         # command-line interface
 ├── data/sample_states.json   # offline demo data
 └── tests/                     # unit tests (no network)
@@ -130,4 +170,9 @@ python3 -m unittest discover -s tests -v
 -v, --verbose     show the per-aircraft dB breakdown
     --demo        use bundled sample data (offline)
     --watch SECS  refresh continuously every SECS
+    --roku        reverse-duck a Roku TV's volume as planes pass
+    --roku-ip     Roku IP (else ROKU_IP env, else SSDP discovery)
+    --roku-dry-run  print volume keypresses instead of sending them
+    --duck-floor / --duck-ceiling / --duck-max-steps / --duck-rate
+                  tune the loudness -> volume-boost mapping
 ```
