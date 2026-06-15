@@ -50,6 +50,11 @@
   #reallogo { max-height:64px; }
   .brand .title { font-size:18px; font-weight:900; text-shadow:2px 2px 0 #000a; }
   .brand .title small { display:block; color:var(--cr-yellow); font-size:12px; letter-spacing:2px; }
+  .addrform { display:flex; gap:6px; align-items:center; }
+  .addrform input { width:260px; max-width:42vw; padding:9px 12px; border-radius:10px; border:3px solid var(--cr-yellow);
+    background:#06143f; color:var(--cream); font-size:14px; font-weight:700; }
+  .addrform input::placeholder { color:#8fa8e8; font-weight:400; }
+  .addrform button { padding:9px 12px; }
   header.brand .addr { color:var(--cream); }
   header.brand .badge { margin-left:auto; font-weight:900; background:var(--cr-yellow); color:#240;
     padding:5px 12px; border-radius:20px; transform:rotate(2deg); box-shadow:0 3px 0 #c9a600; }
@@ -135,6 +140,10 @@
   <img id="reallogo" src="/static/logo.png" alt="" onerror="this.remove()" />
   <div class="logo-badge"><span class="word">D<b>▲</b>RIT<b>▲</b>S</span><span class="tag">COOL RANCH</span></div>
   <div class="title">FLIGHT NOISE<small>POWERED BY COOL RANCH&trade;*</small></div>
+  <form id="addrform" class="addrform">
+    <input id="addrinput" type="text" placeholder="Enter an address to monitor…" autocomplete="off" />
+    <button type="submit">📍 GO</button>
+  </form>
   <span class="addr" id="addr">…</span>
   <span class="badge" id="badge"></span>
 </header>
@@ -228,6 +237,7 @@ const BAG_SVG = `
 })();
 
 let map, addrMarker, planeLayer, chart;
+let curCenter = { lat: null, lon: null };
 
 function dbaColor(d) {
   if (d == null) return "#555";
@@ -318,6 +328,13 @@ async function refresh() {
   if (!map) initMap(s.location.lat, s.location.lon);
   if (!chart) initChart();
 
+  // Recenter when the monitored location changes.
+  if (s.location.lat != null && (s.location.lat !== curCenter.lat || s.location.lon !== curCenter.lon)) {
+    curCenter = { lat: s.location.lat, lon: s.location.lon };
+    addrMarker.setLatLng([s.location.lat, s.location.lon]);
+    map.setView([s.location.lat, s.location.lon]);
+  }
+
   const loud = s.loudest;
   document.getElementById("louddba").textContent = loud ? loud.dba.toFixed(1) : "—";
   document.getElementById("loudcs").textContent = loud ? loud.callsign : "";
@@ -338,6 +355,28 @@ document.querySelectorAll("[data-roku]").forEach(btn => {
 });
 document.getElementById("autoduck").addEventListener("change", async (e) => {
   await fetch("/api/duck/" + (e.target.checked ? "on" : "off"), { method:"POST" });
+  refresh();
+});
+
+document.getElementById("addrform").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const input = document.getElementById("addrinput");
+  const address = input.value.trim();
+  if (!address) return;
+  const btn = e.target.querySelector("button");
+  btn.disabled = true; btn.textContent = "…";
+  document.getElementById("err").textContent = "";
+  try {
+    const r = await (await fetch("/api/location", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ address }),
+    })).json();
+    if (!r.ok) { document.getElementById("err").textContent = "address error: " + r.error; }
+    else { input.value = ""; }
+  } catch (err) {
+    document.getElementById("err").textContent = "address error: " + err;
+  }
+  btn.disabled = false; btn.textContent = "📍 GO";
   refresh();
 });
 

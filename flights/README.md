@@ -139,6 +139,8 @@ Open <http://localhost:8000>. The page shows:
   planes.
 - **Roku TV panel** — connection status, a boost meter, manual Vol −/+/Mute
   buttons, and a toggle for automatic reverse-ducking.
+- **Address input** — type a new address (or it accepts lat/lon via the API) to
+  switch the monitored location on the fly; the map recenters and history resets.
 
 A background thread polls flights every `--interval` seconds, runs the model and
 reverse-duck, and keeps a rolling history; the browser polls `/api/state` and

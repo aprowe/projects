@@ -156,6 +156,31 @@ class DashboardState:
             return {"ok": False, "error": str(e)}
         return {"ok": True}
 
+    def set_location(self, address=None, lat=None, lon=None) -> dict:
+        """Switch the monitored location (geocoding the address if needed)."""
+        from .config import default_location
+        from .geocode import geocode
+
+        try:
+            if lat is not None and lon is not None:
+                loc = default_location()
+                loc.lat, loc.lon = float(lat), float(lon)
+                loc.address = address or f"{loc.lat:.4f}, {loc.lon:.4f}"
+            elif address and address.strip():
+                loc = geocode(address.strip())
+            else:
+                return {"ok": False, "error": "provide an address or lat/lon"}
+        except Exception as e:  # noqa: BLE001 - geocoding may fail/offline
+            return {"ok": False, "error": f"could not locate: {e}"}
+
+        with self.lock:
+            self.location = loc
+            self.history.clear()
+            self.snapshot = None
+        self.poll_once()
+        return {"ok": True, "location": {"address": loc.address,
+                                         "lat": loc.lat, "lon": loc.lon}}
+
     def set_auto_duck(self, enabled: bool) -> dict:
         with self.lock:
             self.auto_duck = enabled and self.roku is not None
@@ -209,6 +234,15 @@ def make_handler(state: DashboardState):
             else:
                 self._send(404, json.dumps({"error": "not found"}))
 
+        def _read_json(self):
+            length = int(self.headers.get("Content-Length") or 0)
+            if not length:
+                return {}
+            try:
+                return json.loads(self.rfile.read(length) or b"{}")
+            except ValueError:
+                return {}
+
         def do_POST(self):
             if self.path.startswith("/api/roku/"):
                 result = state.roku_action(self.path.rsplit("/", 1)[-1])
@@ -216,6 +250,10 @@ def make_handler(state: DashboardState):
                 result = state.set_auto_duck(True)
             elif self.path == "/api/duck/off":
                 result = state.set_auto_duck(False)
+            elif self.path == "/api/location":
+                body = self._read_json()
+                result = state.set_location(body.get("address"),
+                                            body.get("lat"), body.get("lon"))
             else:
                 result = {"ok": False, "error": "not found"}
             self._send(200 if result.get("ok") else 400, json.dumps(result))

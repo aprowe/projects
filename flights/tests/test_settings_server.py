@@ -79,6 +79,20 @@ class TestDashboardState(unittest.TestCase):
         self.assertEqual(st.roku_action("volume_down"), {"ok": True})
         self.assertIn("VolumeDown", self.keys)
 
+    def test_set_location_by_latlon(self):
+        st = self._state()
+        st.poll_once()
+        res = st.set_location(address="Somewhere", lat=33.94, lon=-118.40)
+        self.assertTrue(res["ok"])
+        self.assertEqual(st.location.lat, 33.94)
+        self.assertEqual(st.location.address, "Somewhere")
+        # History is reset and immediately re-polled for the new location.
+        self.assertEqual(len(st.history), 1)
+
+    def test_set_location_requires_input(self):
+        st = self._state()
+        self.assertFalse(st.set_location()["ok"])
+
     def test_disabling_auto_duck_restores_baseline(self):
         st = self._state()
         st.poll_once()
