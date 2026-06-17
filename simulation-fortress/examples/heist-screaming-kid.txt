@@ -1,0 +1,23 @@
+go 13
+{"action":"Note","text":"--- AI: The parents are down. The kid in the closet panics and starts screaming for help. He keeps yelling and yelling. ---"}
+{"action":"Scream","source":"kid","intensity":0.95}
+go 1
+{"action":"Scream","source":"kid","intensity":0.95}
+go 1
+{"action":"Scream","source":"kid","intensity":0.95}
+go 1
+{"action":"Scream","source":"kid","intensity":0.95}
+go 1
+{"action":"Scream","source":"kid","intensity":0.95}
+go 1
+{"action":"Scream","source":"kid","intensity":0.95}
+go 1
+{"action":"Scream","source":"kid","intensity":0.95}
+go 1
+{"action":"Scream","source":"kid","intensity":0.95}
+go 1
+{"action":"Scream","source":"kid","intensity":0.95}
+go 1
+{"action":"Scream","source":"kid","intensity":0.95}
+go 50
+q

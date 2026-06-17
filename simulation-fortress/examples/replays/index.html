@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Simulation Fortress — Replays</title>
+<style>
+:root { --bg:#0d1117; --fg:#c9d1d9; --muted:#8b949e; --accent:#58a6ff; --panel:#161b22; --border:#30363d; }
+* { box-sizing:border-box; }
+html,body { margin:0; padding:0; }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+  padding: 16px;
+  max-width: 720px;
+  margin: 0 auto;
+}
+h1 { margin: 0 0 8px; font-size: 22px; }
+header p { margin: 0 0 24px; color: var(--muted); }
+h2 { font-size: 17px; margin: 24px 0 8px; color: var(--accent); }
+.replay {
+  display: block;
+  padding: 14px 16px;
+  margin: 8px 0;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  text-decoration: none;
+  color: var(--fg);
+}
+.replay:active { background: #1c2129; }
+.replay h3 { margin: 0 0 4px; font-size: 16px; }
+.replay p { margin: 0; color: var(--muted); font-size: 14px; }
+.section { margin-bottom: 16px; }
+footer { margin-top: 32px; color: var(--muted); font-size: 13px; }
+code { font-family: ui-monospace, SFMono-Regular, "SF Mono", monospace; background: var(--panel); padding: 2px 6px; border-radius: 4px; font-size: 13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Simulation Fortress — Replays</h1>
+  <p>Self-contained ASCII playbacks. Tap a scenario, scrub through the timeline.</p>
+</header>
+
+<section class="section">
+  <h2>Family home invasion (3 variants of the same scenario)</h2>
+  <a class="replay" href="heist-silent-kid.html">
+    <h3>Silent kid</h3>
+    <p>The kid stays hidden in the closet. Parents are killed. Invaders loot the necklace and wallet, walk out. Kid survives.</p>
+  </a>
+  <a class="replay" href="heist-screaming-kid.html">
+    <h3>Screaming kid (REPL injection: <code>Action::Scream</code>)</h3>
+    <p>After the parents fall, the AI makes the kid scream. Invaders' planner step 2 (heard violent noise) kicks in. They find the closet, kill the kid. One slips on the urine puddle the kid left earlier.</p>
+  </a>
+  <a class="replay" href="heist-dog-tracker.html">
+    <h3>Dog tracker (REPL injection: <code>Action::Spawn</code> dog)</h3>
+    <p>A sniffer dog follows the kid's urine smell across the room despite invaders attacking it. Reaches the closet, bites the kid. Dies — but draws the invaders to the closet, who finish the job.</p>
+  </a>
+</section>
+
+<section class="section">
+  <h2>Other scenarios</h2>
+  <a class="replay" href="home_invasion.html">
+    <h3>Home invasion (the original 24-tick combat scenario)</h3>
+    <p>Crowbar-wielding intruder kills a family of three in their cabin.</p>
+  </a>
+  <a class="replay" href="farming.html">
+    <h3>Farming</h3>
+    <p>Two farmers cooperatively harvest a 4×4 field of crops, breaking for two coffee meals across the day.</p>
+  </a>
+  <a class="replay" href="office.html">
+    <h3>Office drama</h3>
+    <p>Five workers cycle between desks and the coffee station. Gossip narration fires every 7 ticks.</p>
+  </a>
+  <a class="replay" href="office-zombie.html">
+    <h3>Zombie in the office (REPL injection of the "AI drops a zombie")</h3>
+    <p>Tick 20: the AI spawns a zombie with a steel crowbar and queues an attack on alice. Workers' panic propagates through screams. Everyone flees.</p>
+  </a>
+  <a class="replay" href="mansion.html">
+    <h3>Mansion home invasion (60&times;45, two floors, colored)</h3>
+    <p>Now multi-story DF-style. The pathfinder traverses ramps, the staircase furniture stamps a `RampUp` voxel + Empty-supported tile above, and the replay viewer has a "floor" dropdown so you can scrub between z=0 (ground floor: foyer, kitchen, master suite, family room, kids' wing, guest room) and z=1 (upstairs: two bedrooms above the foyer with the teen and a queen bed full of jewelry). Materials carry RGB color, items carry Quality (Crude → Heirloom) and Style (Victorian, Modern, Art Deco, …), some pieces wear Blemishes (dent, burn mark, sun-faded patch, engraving, patina) and Finishes (glossy, lacquered, distressed). The front door is painted glossy red via a Paint override. Burglars grab priciest known loot first (sorted by Value).</p>
+  </a>
+  <a class="replay" href="cafeteria.html">
+    <h3>Cafeteria food fight (schedule-driven)</h3>
+    <p>11:25 AM at a high-school cafeteria. Chef and lunch ladies on shift; freshmen stream in at 11:30, seniors at 11:50. At 12:15 the instigator hurls a plate of mashed potato across the room. The other students &mdash; anyone with food in hand and a violent sound in earshot &mdash; start chucking ketchup, potato, anything. Built on the new <code>Schedule</code> + <code>Activity</code> system: tellers, ladies, and students all queue MoveTo's per their daily routine.</p>
+  </a>
+  <a class="replay" href="cabin.html">
+    <h3>Retired killer's cabin (woods + reactive AI + ranged combat + climbable furniture)</h3>
+    <p>30&times;30 forest clearing with redwoods, oaks, pines, birches, saplings, bushes, rocks, a fallen log, a stump, a campfire, a brush path winding from a small log cabin to the gravel road. An old man rocks on the porch with a coffee. A van pulls up; three balaclava-wearing assassins approach. The old man's planner is reactive (perception &rarr; decision, no script): when he hears the engine and sees an armed figure, his goal flips from "rocking" to "open the safe / equip / engage". Inside the safe: a shotgun, a 9mm pistol, plenty of ammo, a kevlar vest. Despite his age, his stats (DEX 18, WIS 17) are lethal. Per-cell hover tooltips show what every tile is &mdash; material, kind, hp, value, blemishes.</p>
+  </a>
+  <a class="replay" href="bank.html">
+    <h3>Bank heist (guns + currency + alarms + police response)</h3>
+    <p>40&times;30 bank branch at 09:42. Three robbers in balaclavas burst in through the front, two with 9mm pistols and one with a 12-gauge shotgun. The security guard goes down in three rounds. Tellers see the drawn weapons, raise the alarm, then cower. 18 ticks later two squad cars roar into the parking lot &mdash; the responding officers fan out and engage. The robbers force-open four cash registers (DC 16 strength check), grab stacks of bills, and try to flee to the getaway van under fire. The wall safe (DC 30) and the ATMs (DC 26) are out of their league without proper tools.</p>
+  </a>
+  <a class="replay" href="airport.html">
+    <h3>Airport infiltration (Hitman-style impersonation)</h3>
+    <p>A spy walks through the terminal, swaps into a stolen pilot's uniform, lies past TSA and a boarding agent, and crosses the crew lounge to gate B7. NPCs have <em>local knowledge</em> &mdash; the boarding agent personally knows Captain Hayes' face, so the disguise unravels at the lounge. Same scripted-dialog primitives can later be driven by an LLM.</p>
+  </a>
+</section>
+
+<footer>
+  <p>Generated by <code>cargo run --bin fortress -- &lt;scenario&gt; --replay-html FILE</code>.</p>
+  <p>Source: <a href="https://github.com/aprowe/projects" style="color:var(--accent)">aprowe/projects</a>, branch <code>claude/add-simulation-fortress-AjDMT</code>.</p>
+</footer>
+
+</body>
+</html>

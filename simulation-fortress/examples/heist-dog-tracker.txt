@@ -1,0 +1,5 @@
+go 12
+{"action":"Note","text":"--- AI: The parents are dead, the kid wet himself, and a fresh urine coating is on the closet floor. Let me bring in a tracker. ---"}
+{"action":"Spawn","template":"dog","at":{"x":4,"y":11,"z":0},"kind_label":"sniffer_dog","faction":"invader"}
+go 80
+q

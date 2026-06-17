@@ -1,0 +1,8 @@
+go 20
+{"action":"Note","text":"--- AI: I observe a quiet office. Five workers cycling between desks and coffee. Let me introduce a hostile element to see how the simulation handles it. ---"}
+{"action":"Spawn","template":"zombie","at":{"x":3,"y":5,"z":0}}
+{"action":"Spawn","template":"steel crowbar","equip_on":"zombie"}
+{"action":"QueueTask","actor":"zombie","task":{"type":"Attack","target":"alice"}}
+{"action":"Note","text":"A figure shambles out of the supply closet, eyes glassy, crowbar in hand."}
+go 50
+q
