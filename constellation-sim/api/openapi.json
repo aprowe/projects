@@ -1,0 +1,4939 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Constellation Simulator API",
+    "description": "State and planning interface for a PlanetScope-like Earth-observation constellation. Plans are submitted to the ground segment and only reach a satellite when it next passes over a ground station (see docs/API.md).",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/api/v1/sim": {
+      "get": {
+        "tags": [
+          "sim"
+        ],
+        "summary": "Get Sim",
+        "operationId": "get_sim_api_v1_sim_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SimStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Content",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sim/control": {
+      "post": {
+        "tags": [
+          "sim"
+        ],
+        "summary": "Control",
+        "operationId": "control_api_v1_sim_control_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SimControl"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SimStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Content",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sim/step": {
+      "post": {
+        "tags": [
+          "sim"
+        ],
+        "summary": "Step",
+        "operationId": "step_api_v1_sim_step_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SimStep"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SimStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Content",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sim/reset": {
+      "post": {
+        "tags": [
+          "sim"
+        ],
+        "summary": "Reset",
+        "operationId": "reset_api_v1_sim_reset_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SimReset"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SimStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Content",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/scenario": {
+      "get": {
+        "tags": [
+          "sim"
+        ],
+        "summary": "Scenario",
+        "operationId": "scenario_api_v1_scenario_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScenarioInfo"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Content",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/constellation": {
+      "get": {
+        "tags": [
+          "state"
+        ],
+        "summary": "Constellation",
+        "operationId": "constellation_api_v1_constellation_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConstellationState"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Content",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/satellites": {
+      "get": {
+        "tags": [
+          "state"
+        ],
+        "summary": "Satellites",
+        "operationId": "satellites_api_v1_satellites_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SatelliteState"
+                  },
+                  "type": "array",
+                  "title": "Response Satellites Api V1 Satellites Get"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Content",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/satellites/{satellite_id}": {
+      "get": {
+        "tags": [
+          "state"
+        ],
+        "summary": "Satellite",
+        "operationId": "satellite_api_v1_satellites__satellite_id__get",
+        "parameters": [
+          {
+            "name": "satellite_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Satellite Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SatelliteState"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        }
+      }
+    },
+    "/api/v1/satellites/{satellite_id}/telemetry": {
+      "get": {
+        "tags": [
+          "state"
+        ],
+        "summary": "Telemetry",
+        "operationId": "telemetry_api_v1_satellites__satellite_id__telemetry_get",
+        "parameters": [
+          {
+            "name": "satellite_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Satellite Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SatelliteTelemetry"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        }
+      }
+    },
+    "/api/v1/satellites/{satellite_id}/schedule": {
+      "get": {
+        "tags": [
+          "state"
+        ],
+        "summary": "Schedule",
+        "operationId": "schedule_api_v1_satellites__satellite_id__schedule_get",
+        "parameters": [
+          {
+            "name": "satellite_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Satellite Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OnboardSchedule"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        }
+      }
+    },
+    "/api/v1/satellites/{satellite_id}/ephemeris": {
+      "get": {
+        "tags": [
+          "access"
+        ],
+        "summary": "Ephemeris",
+        "operationId": "ephemeris_api_v1_satellites__satellite_id__ephemeris_get",
+        "parameters": [
+          {
+            "name": "satellite_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Satellite Id"
+            }
+          },
+          {
+            "name": "start",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date-time",
+              "title": "Start"
+            }
+          },
+          {
+            "name": "end",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date-time",
+              "title": "End"
+            }
+          },
+          {
+            "name": "step_s",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "default": 60.0,
+              "title": "Step S"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ephemeris"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        }
+      }
+    },
+    "/api/v1/ground-stations": {
+      "get": {
+        "tags": [
+          "state"
+        ],
+        "summary": "Stations",
+        "operationId": "stations_api_v1_ground_stations_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/GroundStationState"
+                  },
+                  "type": "array",
+                  "title": "Response Stations Api V1 Ground Stations Get"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Content",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/ground-stations/{station_id}": {
+      "get": {
+        "tags": [
+          "state"
+        ],
+        "summary": "Station",
+        "operationId": "station_api_v1_ground_stations__station_id__get",
+        "parameters": [
+          {
+            "name": "station_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Station Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroundStationState"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        }
+      }
+    },
+    "/api/v1/access/contacts": {
+      "get": {
+        "tags": [
+          "access"
+        ],
+        "summary": "Contacts",
+        "operationId": "contacts_api_v1_access_contacts_get",
+        "parameters": [
+          {
+            "name": "start",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date-time",
+              "title": "Start"
+            }
+          },
+          {
+            "name": "end",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date-time",
+              "title": "End"
+            }
+          },
+          {
+            "name": "satellite_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Satellite Id"
+            }
+          },
+          {
+            "name": "station_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Station Id"
+            }
+          },
+          {
+            "name": "min_elevation_deg",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Min Elevation Deg"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ContactWindow"
+                  },
+                  "title": "Response Contacts Api V1 Access Contacts Get"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        }
+      }
+    },
+    "/api/v1/access/opportunities": {
+      "post": {
+        "tags": [
+          "access"
+        ],
+        "summary": "Opportunities",
+        "operationId": "opportunities_api_v1_access_opportunities_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OpportunityQuery"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ImagingOpportunity"
+                  },
+                  "type": "array",
+                  "title": "Response Opportunities Api V1 Access Opportunities Post"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Content",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/plans/validate": {
+      "post": {
+        "tags": [
+          "plans"
+        ],
+        "summary": "Validate",
+        "operationId": "validate_api_v1_plans_validate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlanSubmission"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanValidation"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Content",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/plans": {
+      "post": {
+        "tags": [
+          "plans"
+        ],
+        "summary": "Submit",
+        "operationId": "submit_api_v1_plans_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlanSubmission"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Plan"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "plans"
+        ],
+        "summary": "List Plans",
+        "operationId": "list_plans_api_v1_plans_get",
+        "parameters": [
+          {
+            "name": "satellite_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Satellite Id"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PlanStatus"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Plan"
+                  },
+                  "title": "Response List Plans Api V1 Plans Get"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        }
+      }
+    },
+    "/api/v1/plans/batch": {
+      "post": {
+        "tags": [
+          "plans"
+        ],
+        "summary": "Submit Batch",
+        "operationId": "submit_batch_api_v1_plans_batch_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlanBatchSubmission"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanBatchResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Content",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/plans/{plan_id}": {
+      "get": {
+        "tags": [
+          "plans"
+        ],
+        "summary": "Get Plan",
+        "operationId": "get_plan_api_v1_plans__plan_id__get",
+        "parameters": [
+          {
+            "name": "plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Plan Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Plan"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "plans"
+        ],
+        "summary": "Cancel Plan",
+        "operationId": "cancel_plan_api_v1_plans__plan_id__delete",
+        "parameters": [
+          {
+            "name": "plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Plan Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Plan"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        }
+      }
+    },
+    "/api/v1/requests": {
+      "post": {
+        "tags": [
+          "requests"
+        ],
+        "summary": "Create Request",
+        "operationId": "create_request_api_v1_requests_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImagingRequestCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImagingRequest"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "requests"
+        ],
+        "summary": "List Requests",
+        "operationId": "list_requests_api_v1_requests_get",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/RequestStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ImagingRequest"
+                  },
+                  "title": "Response List Requests Api V1 Requests Get"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        }
+      }
+    },
+    "/api/v1/requests/{request_id}": {
+      "get": {
+        "tags": [
+          "requests"
+        ],
+        "summary": "Get Request",
+        "operationId": "get_request_api_v1_requests__request_id__get",
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Request Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImagingRequest"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "requests"
+        ],
+        "summary": "Cancel Request",
+        "operationId": "cancel_request_api_v1_requests__request_id__delete",
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Request Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImagingRequest"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        }
+      }
+    },
+    "/api/v1/images": {
+      "get": {
+        "tags": [
+          "products"
+        ],
+        "summary": "Images",
+        "operationId": "images_api_v1_images_get",
+        "parameters": [
+          {
+            "name": "satellite_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Satellite Id"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/ImageStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Since"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 5000,
+              "minimum": 1,
+              "default": 500,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImagePage"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        }
+      }
+    },
+    "/api/v1/events": {
+      "get": {
+        "tags": [
+          "products"
+        ],
+        "summary": "Events",
+        "operationId": "events_api_v1_events_get",
+        "parameters": [
+          {
+            "name": "after_seq",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "After Seq"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 10000,
+              "minimum": 1,
+              "default": 1000,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/EventType"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Type"
+            }
+          },
+          {
+            "name": "satellite_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Satellite Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        }
+      }
+    },
+    "/api/v1/metrics": {
+      "get": {
+        "tags": [
+          "products"
+        ],
+        "summary": "Metrics",
+        "operationId": "metrics_api_v1_metrics_get",
+        "parameters": [
+          {
+            "name": "window_s",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "default": 86400.0,
+              "title": "Window S"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Metrics"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        }
+      }
+    },
+    "/api/v1/coverage": {
+      "get": {
+        "tags": [
+          "products"
+        ],
+        "summary": "Coverage",
+        "operationId": "coverage_api_v1_coverage_get",
+        "parameters": [
+          {
+            "name": "resolution_deg",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "default": 1.0,
+              "title": "Resolution Deg"
+            }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Since"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CoverageGrid"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          }
+        }
+      }
+    },
+    "/api/v1/weather/cloud-forecast": {
+      "post": {
+        "tags": [
+          "weather"
+        ],
+        "summary": "Cloud Forecast",
+        "operationId": "cloud_forecast_api_v1_weather_cloud_forecast_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CloudQuery"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CloudForecastResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Content",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ActivityStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "scheduled",
+          "executing",
+          "completed",
+          "partial",
+          "failed",
+          "skipped",
+          "superseded"
+        ],
+        "title": "ActivityStatus"
+      },
+      "CloudForecast": {
+        "properties": {
+          "point": {
+            "$ref": "#/components/schemas/GeoPoint"
+          },
+          "time": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Time"
+          },
+          "issued_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Issued At"
+          },
+          "cloud_fraction": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Cloud Fraction"
+          },
+          "sigma": {
+            "type": "number",
+            "title": "Sigma",
+            "description": "1-sigma forecast uncertainty; grows with lead time."
+          }
+        },
+        "type": "object",
+        "required": [
+          "point",
+          "time",
+          "issued_at",
+          "cloud_fraction",
+          "sigma"
+        ],
+        "title": "CloudForecast"
+      },
+      "CloudForecastResponse": {
+        "properties": {
+          "forecasts": {
+            "items": {
+              "$ref": "#/components/schemas/CloudForecast"
+            },
+            "type": "array",
+            "title": "Forecasts"
+          }
+        },
+        "type": "object",
+        "required": [
+          "forecasts"
+        ],
+        "title": "CloudForecastResponse"
+      },
+      "CloudQuery": {
+        "properties": {
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/GeoPoint"
+            },
+            "type": "array",
+            "title": "Points"
+          },
+          "times": {
+            "items": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "type": "array",
+            "title": "Times",
+            "description": "Either one time (applied to all points) or one per point."
+          }
+        },
+        "type": "object",
+        "required": [
+          "points",
+          "times"
+        ],
+        "title": "CloudQuery"
+      },
+      "ConstellationState": {
+        "properties": {
+          "sim": {
+            "$ref": "#/components/schemas/SimStatus"
+          },
+          "satellites": {
+            "items": {
+              "$ref": "#/components/schemas/SatelliteState"
+            },
+            "type": "array",
+            "title": "Satellites"
+          },
+          "ground_stations": {
+            "items": {
+              "$ref": "#/components/schemas/GroundStationState"
+            },
+            "type": "array",
+            "title": "Ground Stations"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sim",
+          "satellites",
+          "ground_stations"
+        ],
+        "title": "ConstellationState"
+      },
+      "ContactWindow": {
+        "properties": {
+          "satellite_id": {
+            "type": "string",
+            "title": "Satellite Id"
+          },
+          "station_id": {
+            "type": "string",
+            "title": "Station Id"
+          },
+          "aos": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Aos"
+          },
+          "los": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Los"
+          },
+          "tca": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Tca",
+            "description": "Time of max elevation."
+          },
+          "max_elevation_deg": {
+            "type": "number",
+            "title": "Max Elevation Deg"
+          },
+          "duration_s": {
+            "type": "number",
+            "title": "Duration S"
+          }
+        },
+        "type": "object",
+        "required": [
+          "satellite_id",
+          "station_id",
+          "aos",
+          "los",
+          "tca",
+          "max_elevation_deg",
+          "duration_s"
+        ],
+        "title": "ContactWindow"
+      },
+      "CoverageGrid": {
+        "properties": {
+          "resolution_deg": {
+            "type": "number",
+            "title": "Resolution Deg"
+          },
+          "since": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Since"
+          },
+          "sim_time": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Sim Time"
+          },
+          "mask": {
+            "type": "string",
+            "enum": [
+              "none",
+              "land"
+            ],
+            "title": "Mask",
+            "default": "none"
+          },
+          "coverage_fraction": {
+            "type": "number",
+            "title": "Coverage Fraction"
+          },
+          "rows": {
+            "type": "integer",
+            "title": "Rows"
+          },
+          "cols": {
+            "type": "integer",
+            "title": "Cols"
+          },
+          "origin": {
+            "$ref": "#/components/schemas/GeoPoint",
+            "description": "North-west corner of cell [0][0]. Rows go south, cols go east."
+          },
+          "last_imaged_s": {
+            "items": {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            "type": "array",
+            "title": "Last Imaged S",
+            "description": "Seconds since epoch of the latest image of each cell, or null."
+          }
+        },
+        "type": "object",
+        "required": [
+          "resolution_deg",
+          "since",
+          "sim_time",
+          "coverage_fraction",
+          "rows",
+          "cols",
+          "origin",
+          "last_imaged_s"
+        ],
+        "title": "CoverageGrid"
+      },
+      "DownlinkActivity": {
+        "properties": {
+          "start": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Start"
+          },
+          "end": {
+            "type": "string",
+            "format": "date-time",
+            "title": "End"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ActivityStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "result": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result",
+            "description": "Execution outcome (data_mb, reason, image_ids, ...)."
+          },
+          "type": {
+            "type": "string",
+            "const": "downlink",
+            "title": "Type",
+            "default": "downlink"
+          },
+          "station_id": {
+            "type": "string",
+            "title": "Station Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "start",
+          "end",
+          "station_id"
+        ],
+        "title": "DownlinkActivity",
+        "description": "Point at ``station_id`` and dump stored imagery for [start, end).\n\nReserves one antenna at the station for the interval."
+      },
+      "Ephemeris": {
+        "properties": {
+          "satellite_id": {
+            "type": "string",
+            "title": "Satellite Id"
+          },
+          "step_s": {
+            "type": "number",
+            "title": "Step S"
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/EphemerisPoint"
+            },
+            "type": "array",
+            "title": "Points"
+          }
+        },
+        "type": "object",
+        "required": [
+          "satellite_id",
+          "step_s",
+          "points"
+        ],
+        "title": "Ephemeris"
+      },
+      "EphemerisPoint": {
+        "properties": {
+          "time": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Time"
+          },
+          "position": {
+            "$ref": "#/components/schemas/GeoPosition"
+          },
+          "position_eci_km": {
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "type": "array",
+            "maxItems": 3,
+            "minItems": 3,
+            "title": "Position Eci Km"
+          },
+          "velocity_eci_km_s": {
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "type": "array",
+            "maxItems": 3,
+            "minItems": 3,
+            "title": "Velocity Eci Km S"
+          },
+          "in_sunlight": {
+            "type": "boolean",
+            "title": "In Sunlight"
+          },
+          "sun_elevation_deg": {
+            "type": "number",
+            "title": "Sun Elevation Deg"
+          }
+        },
+        "type": "object",
+        "required": [
+          "time",
+          "position",
+          "position_eci_km",
+          "velocity_eci_km_s",
+          "in_sunlight",
+          "sun_elevation_deg"
+        ],
+        "title": "EphemerisPoint"
+      },
+      "ErrorBody": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "details": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Details"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "ErrorBody"
+      },
+      "ErrorResponse": {
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/ErrorBody"
+          }
+        },
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "title": "ErrorResponse"
+      },
+      "Event": {
+        "properties": {
+          "seq": {
+            "type": "integer",
+            "title": "Seq",
+            "description": "Monotonic; use as a cursor (`after_seq`)."
+          },
+          "time": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Time"
+          },
+          "type": {
+            "$ref": "#/components/schemas/EventType"
+          },
+          "satellite_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Satellite Id"
+          },
+          "station_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Station Id"
+          },
+          "plan_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plan Id"
+          },
+          "activity_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Activity Id"
+          },
+          "image_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Id"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Id"
+          },
+          "data": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Data"
+          }
+        },
+        "type": "object",
+        "required": [
+          "seq",
+          "time",
+          "type"
+        ],
+        "title": "Event"
+      },
+      "EventPage": {
+        "properties": {
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/Event"
+            },
+            "type": "array",
+            "title": "Events"
+          },
+          "next_after_seq": {
+            "type": "integer",
+            "title": "Next After Seq"
+          },
+          "has_more": {
+            "type": "boolean",
+            "title": "Has More"
+          }
+        },
+        "type": "object",
+        "required": [
+          "events",
+          "next_after_seq",
+          "has_more"
+        ],
+        "title": "EventPage"
+      },
+      "EventType": {
+        "type": "string",
+        "enum": [
+          "sim_reset",
+          "contact_start",
+          "contact_end",
+          "telemetry_received",
+          "plan_queued",
+          "plan_uplinked",
+          "plan_activated",
+          "plan_completed",
+          "plan_superseded",
+          "plan_expired",
+          "plan_cancelled",
+          "activity_started",
+          "activity_ended",
+          "image_captured",
+          "image_downlinked",
+          "request_created",
+          "request_captured",
+          "request_fulfilled",
+          "request_expired",
+          "storage_full",
+          "battery_low",
+          "safe_mode_entered",
+          "safe_mode_exited"
+        ],
+        "title": "EventType"
+      },
+      "FlockInfo": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "satellite_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Satellite Ids"
+          },
+          "altitude_km": {
+            "type": "number",
+            "title": "Altitude Km"
+          },
+          "inclination_deg": {
+            "type": "number",
+            "title": "Inclination Deg"
+          },
+          "ltdn_hours": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ltdn Hours",
+            "description": "Local time of descending node (SSO planes)."
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "satellite_ids",
+          "altitude_km",
+          "inclination_deg"
+        ],
+        "title": "FlockInfo"
+      },
+      "GeoPoint": {
+        "properties": {
+          "lat_deg": {
+            "type": "number",
+            "maximum": 90.0,
+            "minimum": -90.0,
+            "title": "Lat Deg"
+          },
+          "lon_deg": {
+            "type": "number",
+            "maximum": 180.0,
+            "minimum": -180.0,
+            "title": "Lon Deg"
+          }
+        },
+        "type": "object",
+        "required": [
+          "lat_deg",
+          "lon_deg"
+        ],
+        "title": "GeoPoint"
+      },
+      "GeoPosition": {
+        "properties": {
+          "lat_deg": {
+            "type": "number",
+            "maximum": 90.0,
+            "minimum": -90.0,
+            "title": "Lat Deg"
+          },
+          "lon_deg": {
+            "type": "number",
+            "maximum": 180.0,
+            "minimum": -180.0,
+            "title": "Lon Deg"
+          },
+          "alt_km": {
+            "type": "number",
+            "title": "Alt Km"
+          }
+        },
+        "type": "object",
+        "required": [
+          "lat_deg",
+          "lon_deg",
+          "alt_km"
+        ],
+        "title": "GeoPosition"
+      },
+      "GroundStationState": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "location": {
+            "$ref": "#/components/schemas/GeoPosition"
+          },
+          "min_elevation_deg": {
+            "type": "number",
+            "title": "Min Elevation Deg"
+          },
+          "antennas": {
+            "type": "integer",
+            "title": "Antennas"
+          },
+          "max_downlink_rate_mbps": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Downlink Rate Mbps"
+          },
+          "as_of": {
+            "type": "string",
+            "format": "date-time",
+            "title": "As Of"
+          },
+          "satellites_in_view": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Satellites In View"
+          },
+          "antennas_busy": {
+            "type": "integer",
+            "title": "Antennas Busy"
+          },
+          "reservations": {
+            "items": {
+              "$ref": "#/components/schemas/Reservation"
+            },
+            "type": "array",
+            "title": "Reservations",
+            "description": "Upcoming/ongoing downlink reservations."
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "location",
+          "min_elevation_deg",
+          "antennas",
+          "as_of",
+          "satellites_in_view",
+          "antennas_busy",
+          "reservations"
+        ],
+        "title": "GroundStationState"
+      },
+      "HealthStatus": {
+        "type": "string",
+        "enum": [
+          "nominal",
+          "degraded",
+          "safe",
+          "decommissioned"
+        ],
+        "title": "HealthStatus"
+      },
+      "Image": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "satellite_id": {
+            "type": "string",
+            "title": "Satellite Id"
+          },
+          "plan_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plan Id"
+          },
+          "activity_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Activity Id"
+          },
+          "start": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Start"
+          },
+          "end": {
+            "type": "string",
+            "format": "date-time",
+            "title": "End"
+          },
+          "size_mb": {
+            "type": "number",
+            "title": "Size Mb"
+          },
+          "downlinked_mb": {
+            "type": "number",
+            "title": "Downlinked Mb"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ImageStatus"
+          },
+          "downlinked_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Downlinked At"
+          },
+          "downlink_station_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Downlink Station Id"
+          },
+          "cloud_fraction": {
+            "type": "number",
+            "title": "Cloud Fraction"
+          },
+          "swath_km": {
+            "type": "number",
+            "title": "Swath Km"
+          },
+          "centerline": {
+            "items": {
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array",
+              "maxItems": 2,
+              "minItems": 2
+            },
+            "type": "array",
+            "title": "Centerline",
+            "description": "[lon_deg, lat_deg] samples along the ground track."
+          },
+          "request_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Request Ids",
+            "description": "Requests whose target falls inside the strip."
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "satellite_id",
+          "plan_id",
+          "activity_id",
+          "start",
+          "end",
+          "size_mb",
+          "downlinked_mb",
+          "status",
+          "cloud_fraction",
+          "swath_km",
+          "centerline"
+        ],
+        "title": "Image",
+        "description": "One continuous strip captured during an imaging activity."
+      },
+      "ImagePage": {
+        "properties": {
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "offset": {
+            "type": "integer",
+            "title": "Offset"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/Image"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total",
+          "offset",
+          "limit",
+          "items"
+        ],
+        "title": "ImagePage"
+      },
+      "ImageStatus": {
+        "type": "string",
+        "enum": [
+          "onboard",
+          "downlinked",
+          "lost"
+        ],
+        "title": "ImageStatus"
+      },
+      "ImagingActivity": {
+        "properties": {
+          "start": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Start"
+          },
+          "end": {
+            "type": "string",
+            "format": "date-time",
+            "title": "End"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ActivityStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "result": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result",
+            "description": "Execution outcome (data_mb, reason, image_ids, ...)."
+          },
+          "type": {
+            "type": "string",
+            "const": "imaging",
+            "title": "Type",
+            "default": "imaging"
+          },
+          "request_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Request Ids",
+            "description": "Optional tags: requests this strip is meant to serve."
+          }
+        },
+        "type": "object",
+        "required": [
+          "start",
+          "end"
+        ],
+        "title": "ImagingActivity",
+        "description": "Turn the (nadir-pointing) camera on for [start, end)."
+      },
+      "ImagingOpportunity": {
+        "properties": {
+          "satellite_id": {
+            "type": "string",
+            "title": "Satellite Id"
+          },
+          "target": {
+            "$ref": "#/components/schemas/GeoPoint"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Id"
+          },
+          "tca": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Tca",
+            "description": "Time the target is closest to the ground track."
+          },
+          "start": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Start",
+            "description": "Target enters the swath (along-track frame edge)."
+          },
+          "end": {
+            "type": "string",
+            "format": "date-time",
+            "title": "End"
+          },
+          "cross_track_km": {
+            "type": "number",
+            "title": "Cross Track Km",
+            "description": "Signed: + = right of ground track."
+          },
+          "sun_elevation_deg": {
+            "type": "number",
+            "title": "Sun Elevation Deg"
+          }
+        },
+        "type": "object",
+        "required": [
+          "satellite_id",
+          "target",
+          "tca",
+          "start",
+          "end",
+          "cross_track_km",
+          "sun_elevation_deg"
+        ],
+        "title": "ImagingOpportunity"
+      },
+      "ImagingRequest": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "target": {
+            "$ref": "#/components/schemas/GeoPoint"
+          },
+          "priority": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Priority",
+            "description": "Relative value; scoring weight.",
+            "default": 1.0
+          },
+          "window_start": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window Start"
+          },
+          "window_end": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Window End"
+          },
+          "max_cloud_fraction": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Max Cloud Fraction",
+            "default": 1.0
+          },
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RequestStatus"
+          },
+          "image_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Image Ids"
+          },
+          "captured_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Captured At"
+          },
+          "fulfilled_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fulfilled At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "target",
+          "window_end",
+          "id",
+          "created_at",
+          "status"
+        ],
+        "title": "ImagingRequest"
+      },
+      "ImagingRequestCreate": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "target": {
+            "$ref": "#/components/schemas/GeoPoint"
+          },
+          "priority": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Priority",
+            "description": "Relative value; scoring weight.",
+            "default": 1.0
+          },
+          "window_start": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window Start"
+          },
+          "window_end": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Window End"
+          },
+          "max_cloud_fraction": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Max Cloud Fraction",
+            "default": 1.0
+          }
+        },
+        "type": "object",
+        "required": [
+          "target",
+          "window_end"
+        ],
+        "title": "ImagingRequestCreate"
+      },
+      "Metrics": {
+        "properties": {
+          "sim_time": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Sim Time"
+          },
+          "window_start": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Window Start"
+          },
+          "images_captured": {
+            "type": "integer",
+            "title": "Images Captured"
+          },
+          "images_downlinked": {
+            "type": "integer",
+            "title": "Images Downlinked"
+          },
+          "data_captured_mb": {
+            "type": "number",
+            "title": "Data Captured Mb"
+          },
+          "data_downlinked_mb": {
+            "type": "number",
+            "title": "Data Downlinked Mb"
+          },
+          "data_onboard_mb": {
+            "type": "number",
+            "title": "Data Onboard Mb"
+          },
+          "mean_latency_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mean Latency S",
+            "description": "Capture end -> fully downlinked."
+          },
+          "p90_latency_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P90 Latency S"
+          },
+          "coverage_fraction": {
+            "type": "number",
+            "title": "Coverage Fraction",
+            "description": "Area-weighted fraction of grid cells imaged in the window."
+          },
+          "station_utilization": {
+            "type": "number",
+            "title": "Station Utilization",
+            "description": "Antenna-seconds used for downlink / antenna-seconds available."
+          },
+          "satellites_in_safe_mode": {
+            "type": "integer",
+            "title": "Satellites In Safe Mode"
+          },
+          "requests": {
+            "$ref": "#/components/schemas/RequestMetrics"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sim_time",
+          "window_start",
+          "images_captured",
+          "images_downlinked",
+          "data_captured_mb",
+          "data_downlinked_mb",
+          "data_onboard_mb",
+          "mean_latency_s",
+          "p90_latency_s",
+          "coverage_fraction",
+          "station_utilization",
+          "satellites_in_safe_mode",
+          "requests"
+        ],
+        "title": "Metrics"
+      },
+      "OnboardSchedule": {
+        "properties": {
+          "satellite_id": {
+            "type": "string",
+            "title": "Satellite Id"
+          },
+          "as_of": {
+            "type": "string",
+            "format": "date-time",
+            "title": "As Of"
+          },
+          "activities": {
+            "items": {
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/ImagingActivity"
+                },
+                {
+                  "$ref": "#/components/schemas/DownlinkActivity"
+                }
+              ],
+              "discriminator": {
+                "propertyName": "type",
+                "mapping": {
+                  "downlink": "#/components/schemas/DownlinkActivity",
+                  "imaging": "#/components/schemas/ImagingActivity"
+                }
+              }
+            },
+            "type": "array",
+            "title": "Activities",
+            "description": "Onboard timeline, including recently finished activities."
+          },
+          "queued_plan_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Queued Plan Ids"
+          }
+        },
+        "type": "object",
+        "required": [
+          "satellite_id",
+          "as_of",
+          "activities",
+          "queued_plan_ids"
+        ],
+        "title": "OnboardSchedule",
+        "description": "What the satellite will actually do (truth), plus what is waiting on the ground."
+      },
+      "OpportunityQuery": {
+        "properties": {
+          "start": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Start"
+          },
+          "end": {
+            "type": "string",
+            "format": "date-time",
+            "title": "End"
+          },
+          "targets": {
+            "items": {
+              "$ref": "#/components/schemas/GeoPoint"
+            },
+            "type": "array",
+            "title": "Targets"
+          },
+          "request_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Request Ids"
+          },
+          "satellite_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Satellite Ids"
+          },
+          "min_sun_elevation_deg": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Sun Elevation Deg"
+          }
+        },
+        "type": "object",
+        "required": [
+          "start",
+          "end"
+        ],
+        "title": "OpportunityQuery"
+      },
+      "OrbitElements": {
+        "properties": {
+          "epoch": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Epoch"
+          },
+          "semi_major_axis_km": {
+            "type": "number",
+            "title": "Semi Major Axis Km"
+          },
+          "eccentricity": {
+            "type": "number",
+            "title": "Eccentricity"
+          },
+          "inclination_deg": {
+            "type": "number",
+            "title": "Inclination Deg"
+          },
+          "raan_deg": {
+            "type": "number",
+            "title": "Raan Deg"
+          },
+          "arg_perigee_deg": {
+            "type": "number",
+            "title": "Arg Perigee Deg"
+          },
+          "mean_anomaly_deg": {
+            "type": "number",
+            "title": "Mean Anomaly Deg"
+          },
+          "tle": {
+            "anyOf": [
+              {
+                "prefixItems": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "string"
+                  }
+                ],
+                "type": "array",
+                "maxItems": 2,
+                "minItems": 2
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tle"
+          }
+        },
+        "type": "object",
+        "required": [
+          "epoch",
+          "semi_major_axis_km",
+          "eccentricity",
+          "inclination_deg",
+          "raan_deg",
+          "arg_perigee_deg",
+          "mean_anomaly_deg"
+        ],
+        "title": "OrbitElements",
+        "description": "Osculating/mean Keplerian elements at ``epoch``.\n\nEnough for a client to propagate locally (two-body + J2 secular). ``tle`` is\nprovided when the simulator can produce one (lets you use sgp4/skyfield)."
+      },
+      "Plan": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "satellite_id": {
+            "type": "string",
+            "title": "Satellite Id"
+          },
+          "start": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Start"
+          },
+          "end": {
+            "type": "string",
+            "format": "date-time",
+            "title": "End"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "status": {
+            "$ref": "#/components/schemas/PlanStatus"
+          },
+          "activities": {
+            "items": {
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/ImagingActivity"
+                },
+                {
+                  "$ref": "#/components/schemas/DownlinkActivity"
+                }
+              ],
+              "discriminator": {
+                "propertyName": "type",
+                "mapping": {
+                  "downlink": "#/components/schemas/DownlinkActivity",
+                  "imaging": "#/components/schemas/ImagingActivity"
+                }
+              }
+            },
+            "type": "array",
+            "title": "Activities"
+          },
+          "submitted_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Submitted At"
+          },
+          "uplinked_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uplinked At"
+          },
+          "uplink_station_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uplink Station Id"
+          },
+          "superseded_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Superseded By"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/Violation"
+            },
+            "type": "array",
+            "title": "Warnings"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "satellite_id",
+          "start",
+          "end",
+          "status",
+          "activities",
+          "submitted_at"
+        ],
+        "title": "Plan"
+      },
+      "PlanBatchItem": {
+        "properties": {
+          "index": {
+            "type": "integer",
+            "title": "Index"
+          },
+          "plan": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Plan"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "validation": {
+            "$ref": "#/components/schemas/PlanValidation"
+          }
+        },
+        "type": "object",
+        "required": [
+          "index",
+          "validation"
+        ],
+        "title": "PlanBatchItem"
+      },
+      "PlanBatchResult": {
+        "properties": {
+          "accepted": {
+            "type": "integer",
+            "title": "Accepted"
+          },
+          "rejected": {
+            "type": "integer",
+            "title": "Rejected"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PlanBatchItem"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "accepted",
+          "rejected",
+          "items"
+        ],
+        "title": "PlanBatchResult"
+      },
+      "PlanBatchSubmission": {
+        "properties": {
+          "plans": {
+            "items": {
+              "$ref": "#/components/schemas/PlanSubmission"
+            },
+            "type": "array",
+            "title": "Plans"
+          },
+          "atomic": {
+            "type": "boolean",
+            "title": "Atomic",
+            "description": "If true, reject all plans when any one is invalid.",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "plans"
+        ],
+        "title": "PlanBatchSubmission"
+      },
+      "PlanStatus": {
+        "type": "string",
+        "enum": [
+          "queued",
+          "uplinked",
+          "active",
+          "completed",
+          "superseded",
+          "expired",
+          "cancelled"
+        ],
+        "title": "PlanStatus"
+      },
+      "PlanSubmission": {
+        "properties": {
+          "satellite_id": {
+            "type": "string",
+            "title": "Satellite Id"
+          },
+          "start": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Start"
+          },
+          "end": {
+            "type": "string",
+            "format": "date-time",
+            "title": "End"
+          },
+          "activities": {
+            "items": {
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/ImagingActivity"
+                },
+                {
+                  "$ref": "#/components/schemas/DownlinkActivity"
+                }
+              ],
+              "discriminator": {
+                "propertyName": "type",
+                "mapping": {
+                  "downlink": "#/components/schemas/DownlinkActivity",
+                  "imaging": "#/components/schemas/ImagingActivity"
+                }
+              }
+            },
+            "type": "array",
+            "title": "Activities"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          }
+        },
+        "type": "object",
+        "required": [
+          "satellite_id",
+          "start",
+          "end"
+        ],
+        "title": "PlanSubmission"
+      },
+      "PlanValidation": {
+        "properties": {
+          "valid": {
+            "type": "boolean",
+            "title": "Valid"
+          },
+          "violations": {
+            "items": {
+              "$ref": "#/components/schemas/Violation"
+            },
+            "type": "array",
+            "title": "Violations"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/Violation"
+            },
+            "type": "array",
+            "title": "Warnings"
+          }
+        },
+        "type": "object",
+        "required": [
+          "valid"
+        ],
+        "title": "PlanValidation"
+      },
+      "RequestMetrics": {
+        "properties": {
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "open": {
+            "type": "integer",
+            "title": "Open"
+          },
+          "captured": {
+            "type": "integer",
+            "title": "Captured"
+          },
+          "fulfilled": {
+            "type": "integer",
+            "title": "Fulfilled"
+          },
+          "expired": {
+            "type": "integer",
+            "title": "Expired"
+          },
+          "fulfilled_priority": {
+            "type": "number",
+            "title": "Fulfilled Priority"
+          },
+          "total_priority": {
+            "type": "number",
+            "title": "Total Priority"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total",
+          "open",
+          "captured",
+          "fulfilled",
+          "expired",
+          "fulfilled_priority",
+          "total_priority"
+        ],
+        "title": "RequestMetrics"
+      },
+      "RequestStatus": {
+        "type": "string",
+        "enum": [
+          "open",
+          "captured",
+          "fulfilled",
+          "expired",
+          "cancelled"
+        ],
+        "title": "RequestStatus"
+      },
+      "Reservation": {
+        "properties": {
+          "satellite_id": {
+            "type": "string",
+            "title": "Satellite Id"
+          },
+          "plan_id": {
+            "type": "string",
+            "title": "Plan Id"
+          },
+          "activity_id": {
+            "type": "string",
+            "title": "Activity Id"
+          },
+          "start": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Start"
+          },
+          "end": {
+            "type": "string",
+            "format": "date-time",
+            "title": "End"
+          }
+        },
+        "type": "object",
+        "required": [
+          "satellite_id",
+          "plan_id",
+          "activity_id",
+          "start",
+          "end"
+        ],
+        "title": "Reservation"
+      },
+      "Resources": {
+        "properties": {
+          "storage_used_mb": {
+            "type": "number",
+            "title": "Storage Used Mb"
+          },
+          "storage_capacity_mb": {
+            "type": "number",
+            "title": "Storage Capacity Mb"
+          },
+          "battery_wh": {
+            "type": "number",
+            "title": "Battery Wh"
+          },
+          "battery_capacity_wh": {
+            "type": "number",
+            "title": "Battery Capacity Wh"
+          },
+          "images_onboard": {
+            "type": "integer",
+            "title": "Images Onboard"
+          }
+        },
+        "type": "object",
+        "required": [
+          "storage_used_mb",
+          "storage_capacity_mb",
+          "battery_wh",
+          "battery_capacity_wh",
+          "images_onboard"
+        ],
+        "title": "Resources"
+      },
+      "SatelliteMode": {
+        "type": "string",
+        "enum": [
+          "idle",
+          "imaging",
+          "downlink",
+          "transition",
+          "safe"
+        ],
+        "title": "SatelliteMode"
+      },
+      "SatelliteState": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "flock": {
+            "type": "string",
+            "title": "Flock"
+          },
+          "as_of": {
+            "type": "string",
+            "format": "date-time",
+            "title": "As Of"
+          },
+          "health": {
+            "$ref": "#/components/schemas/HealthStatus"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/SatelliteMode"
+          },
+          "position": {
+            "$ref": "#/components/schemas/GeoPosition"
+          },
+          "position_eci_km": {
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "type": "array",
+            "maxItems": 3,
+            "minItems": 3,
+            "title": "Position Eci Km"
+          },
+          "velocity_eci_km_s": {
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "type": "array",
+            "maxItems": 3,
+            "minItems": 3,
+            "title": "Velocity Eci Km S"
+          },
+          "in_sunlight": {
+            "type": "boolean",
+            "title": "In Sunlight"
+          },
+          "sun_elevation_deg": {
+            "type": "number",
+            "title": "Sun Elevation Deg",
+            "description": "Sun elevation at the sub-satellite point."
+          },
+          "orbit": {
+            "$ref": "#/components/schemas/OrbitElements"
+          },
+          "resources": {
+            "$ref": "#/components/schemas/Resources"
+          },
+          "current_activity": {
+            "anyOf": [
+              {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/ImagingActivity"
+                  },
+                  {
+                    "$ref": "#/components/schemas/DownlinkActivity"
+                  }
+                ],
+                "discriminator": {
+                  "propertyName": "type",
+                  "mapping": {
+                    "downlink": "#/components/schemas/DownlinkActivity",
+                    "imaging": "#/components/schemas/ImagingActivity"
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Activity"
+          },
+          "active_plan_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Plan Id"
+          },
+          "queued_plan_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Queued Plan Ids"
+          },
+          "stations_in_view": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Stations In View"
+          },
+          "last_contact_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Contact At"
+          },
+          "spec": {
+            "$ref": "#/components/schemas/SpacecraftSpec"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "flock",
+          "as_of",
+          "health",
+          "mode",
+          "position",
+          "position_eci_km",
+          "velocity_eci_km_s",
+          "in_sunlight",
+          "sun_elevation_deg",
+          "orbit",
+          "resources",
+          "spec"
+        ],
+        "title": "SatelliteState",
+        "description": "Ground-truth state of one satellite at ``as_of``."
+      },
+      "SatelliteTelemetry": {
+        "properties": {
+          "satellite_id": {
+            "type": "string",
+            "title": "Satellite Id"
+          },
+          "sampled_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sampled At"
+          },
+          "received_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Received At"
+          },
+          "received_via": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Received Via"
+          },
+          "health": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HealthStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "mode": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SatelliteMode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "resources": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Resources"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "active_plan_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Plan Id"
+          },
+          "completed_activity_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Completed Activity Ids"
+          }
+        },
+        "type": "object",
+        "required": [
+          "satellite_id",
+          "sampled_at",
+          "received_at"
+        ],
+        "title": "SatelliteTelemetry",
+        "description": "What the *ground* knows: last telemetry frame received during a contact."
+      },
+      "ScenarioInfo": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "epoch": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Epoch"
+          },
+          "seed": {
+            "type": "integer",
+            "title": "Seed"
+          },
+          "frames": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Frames"
+          },
+          "rules": {
+            "$ref": "#/components/schemas/SimRules"
+          },
+          "flocks": {
+            "items": {
+              "$ref": "#/components/schemas/FlockInfo"
+            },
+            "type": "array",
+            "title": "Flocks"
+          },
+          "ground_station_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Ground Station Ids"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "description",
+          "epoch",
+          "seed",
+          "rules",
+          "flocks",
+          "ground_station_ids"
+        ],
+        "title": "ScenarioInfo"
+      },
+      "SimControl": {
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/SimControlAction"
+          },
+          "rate": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate"
+          }
+        },
+        "type": "object",
+        "required": [
+          "action"
+        ],
+        "title": "SimControl"
+      },
+      "SimControlAction": {
+        "type": "string",
+        "enum": [
+          "pause",
+          "resume",
+          "set_rate"
+        ],
+        "title": "SimControlAction"
+      },
+      "SimReset": {
+        "properties": {
+          "scenario": {
+            "type": "string",
+            "title": "Scenario",
+            "default": "planetscope-default"
+          },
+          "seed": {
+            "type": "integer",
+            "title": "Seed",
+            "default": 0
+          },
+          "epoch": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Epoch"
+          },
+          "num_satellites": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Num Satellites",
+            "description": "Truncate the constellation (handy for tests)."
+          },
+          "random_requests": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Random Requests",
+            "description": "Generate this many random point imaging requests.",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "title": "SimReset"
+      },
+      "SimRules": {
+        "properties": {
+          "plan_max_horizon_s": {
+            "type": "number",
+            "title": "Plan Max Horizon S",
+            "description": "Max (plan.end - plan.start)."
+          },
+          "plan_max_activities": {
+            "type": "integer",
+            "title": "Plan Max Activities"
+          },
+          "uplink_duration_s": {
+            "type": "number",
+            "title": "Uplink Duration S",
+            "description": "Continuous in-view time needed to uplink queued plans."
+          },
+          "opportunistic_uplink": {
+            "type": "boolean",
+            "title": "Opportunistic Uplink",
+            "description": "If true, queued plans uplink at *any* contact with a free antenna, not only during scheduled downlinks."
+          },
+          "telemetry_on_contact": {
+            "type": "boolean",
+            "title": "Telemetry On Contact",
+            "default": true
+          },
+          "safe_mode_enter_battery_frac": {
+            "type": "number",
+            "title": "Safe Mode Enter Battery Frac"
+          },
+          "safe_mode_exit_battery_frac": {
+            "type": "number",
+            "title": "Safe Mode Exit Battery Frac"
+          },
+          "downlink_order": {
+            "type": "string",
+            "enum": [
+              "fifo",
+              "priority"
+            ],
+            "title": "Downlink Order",
+            "default": "fifo"
+          }
+        },
+        "type": "object",
+        "required": [
+          "plan_max_horizon_s",
+          "plan_max_activities",
+          "uplink_duration_s",
+          "opportunistic_uplink",
+          "safe_mode_enter_battery_frac",
+          "safe_mode_exit_battery_frac"
+        ],
+        "title": "SimRules"
+      },
+      "SimStatus": {
+        "properties": {
+          "sim_time": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Sim Time"
+          },
+          "epoch": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Epoch",
+            "description": "Scenario start time."
+          },
+          "running": {
+            "type": "boolean",
+            "title": "Running"
+          },
+          "rate": {
+            "type": "number",
+            "title": "Rate",
+            "description": "Sim seconds per wall-clock second while running."
+          },
+          "step_s": {
+            "type": "number",
+            "title": "Step S",
+            "description": "Internal integration step."
+          },
+          "scenario": {
+            "type": "string",
+            "title": "Scenario"
+          },
+          "last_event_seq": {
+            "type": "integer",
+            "title": "Last Event Seq"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sim_time",
+          "epoch",
+          "running",
+          "rate",
+          "step_s",
+          "scenario",
+          "last_event_seq"
+        ],
+        "title": "SimStatus"
+      },
+      "SimStep": {
+        "properties": {
+          "seconds": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seconds"
+          },
+          "until": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Until"
+          }
+        },
+        "type": "object",
+        "title": "SimStep",
+        "description": "Advance a *paused* simulation deterministically."
+      },
+      "SpacecraftSpec": {
+        "properties": {
+          "bus": {
+            "type": "string",
+            "title": "Bus",
+            "default": "3U"
+          },
+          "instrument": {
+            "type": "string",
+            "title": "Instrument",
+            "default": "PSB.SD"
+          },
+          "bands": {
+            "type": "integer",
+            "title": "Bands",
+            "default": 8
+          },
+          "gsd_m": {
+            "type": "number",
+            "title": "Gsd M"
+          },
+          "swath_km": {
+            "type": "number",
+            "title": "Swath Km"
+          },
+          "storage_capacity_mb": {
+            "type": "number",
+            "title": "Storage Capacity Mb"
+          },
+          "imaging_data_rate_mbps": {
+            "type": "number",
+            "title": "Imaging Data Rate Mbps"
+          },
+          "downlink_rate_mbps": {
+            "type": "number",
+            "title": "Downlink Rate Mbps"
+          },
+          "battery_capacity_wh": {
+            "type": "number",
+            "title": "Battery Capacity Wh"
+          },
+          "solar_power_w": {
+            "type": "number",
+            "title": "Solar Power W"
+          },
+          "idle_power_w": {
+            "type": "number",
+            "title": "Idle Power W"
+          },
+          "imaging_power_w": {
+            "type": "number",
+            "title": "Imaging Power W"
+          },
+          "downlink_power_w": {
+            "type": "number",
+            "title": "Downlink Power W"
+          },
+          "min_sun_elevation_deg": {
+            "type": "number",
+            "title": "Min Sun Elevation Deg",
+            "description": "Imaging produces data only if the sun is at least this high at the sub-satellite point."
+          },
+          "transition_time_s": {
+            "type": "number",
+            "title": "Transition Time S",
+            "description": "Minimum gap between consecutive activities of different type/target (attitude slew)."
+          },
+          "pointing": {
+            "type": "string",
+            "const": "nadir_only",
+            "title": "Pointing",
+            "default": "nadir_only"
+          }
+        },
+        "type": "object",
+        "required": [
+          "gsd_m",
+          "swath_km",
+          "storage_capacity_mb",
+          "imaging_data_rate_mbps",
+          "downlink_rate_mbps",
+          "battery_capacity_wh",
+          "solar_power_w",
+          "idle_power_w",
+          "imaging_power_w",
+          "downlink_power_w",
+          "min_sun_elevation_deg",
+          "transition_time_s"
+        ],
+        "title": "SpacecraftSpec",
+        "description": "Static capabilities of one spacecraft (SuperDove-like by default)."
+      },
+      "Violation": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code",
+            "description": "Machine readable, e.g. OVERLAP, NOT_IN_CONTACT, ANTENNA_CONFLICT, OUT_OF_HORIZON."
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "activity_index": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Activity Index"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "Violation"
+      }
+    }
+  }
+}

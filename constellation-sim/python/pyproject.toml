@@ -1,0 +1,17 @@
+[project]
+name = "planetsim"
+version = "0.1.0"
+description = "Python client (and mock server) for a PlanetScope-like constellation simulator"
+requires-python = ">=3.10"
+dependencies = ["httpx>=0.27", "pydantic>=2.6"]
+
+[project.optional-dependencies]
+mock = ["fastapi>=0.110", "uvicorn>=0.29", "numpy>=1.26"]
+dev = ["planetsim[mock]", "pytest>=8"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["planetsim*"]
