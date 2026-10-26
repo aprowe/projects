@@ -14,7 +14,7 @@ passes over a ground station.** You submit to the ground segment, and the
 uplink happens at the next contact.
 
 ```
-constellation-sim/
+.
 ├── api/openapi.json          # the contract (generated, don't edit by hand)
 ├── docs/API.md               # concepts, rules, plan lifecycle, endpoint reference  ← start here
 └── python/
@@ -30,7 +30,7 @@ constellation-sim/
 ## Quick start
 
 ```bash
-cd constellation-sim/python
+cd python
 pip install -e '.[dev]'
 
 # option A: in-process mock, no server
