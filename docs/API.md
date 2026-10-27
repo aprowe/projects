@@ -236,6 +236,88 @@ Use `POST /plans/validate` to check a plan without queuing it. It returns a
 | GET | `/plans?satellite_id&status=…` | `Plan[]` |
 | GET | `/plans/{id}` | `Plan` (activities include live status/result) |
 | DELETE | `/plans/{id}` | cancels a `queued` plan → `Plan`, otherwise 409 |
+| POST | `/rollouts` | `RolloutRequest` → `RolloutResult` (see §6.5) |
+
+### 6.5 Rollouts (what-if simulation)
+
+`POST /rollouts` answers the question "what would happen if I sent these
+plans?" without changing the live sim. The server:
+
+1. copies the current state, including plans already queued or onboard;
+2. optionally (`cancel_queued`) cancels queued plans for satellites that have
+   a candidate plan;
+3. validates and applies the candidate plans, exactly as `/plans/batch` would;
+4. runs the copy forward to `until` (or for `duration_s`, at most 7 days)
+   and reports the results.
+
+```json
+{
+  "plans": [ ...PlanSubmission ],
+  "duration_s": 21600,
+  "cloud_model": "forecast",
+  "satellite_ids": null,
+  "cancel_queued": false,
+  "monte_carlo": {
+    "samples": 50, "seed": 0,
+    "cloud_model": "sampled",
+    "pass_failure_prob": 0.05,
+    "uplink_failure_prob": 0.1,
+    "anomaly_rate_per_sat_day": 0.02,
+    "anomaly_recovery_s": 21600
+  },
+  "include_plans": true, "include_events": false, "event_types": null
+}
+```
+
+**Deterministic** (`monte_carlo` omitted): one run, with clouds from `cloud_model`:
+
+| `cloud_model` | clouds the imager "sees" |
+|---|---|
+| `forecast` (default) | the forecast issued at rollout start. This is what an honest planner expects. |
+| `sampled` | the forecast plus a random, spatially smooth error with the forecast's `sigma` |
+| `truth` | **oracle**: the real cloud field. Use it for upper bounds and debugging. Planners shouldn't. |
+
+With `truth` and no Monte Carlo, the rollout predicts the live outcome exactly.
+
+**Monte Carlo**: `samples` independent runs. Sample *k* uses seed
+`seed + k`, so results are reproducible. Each sample draws:
+
+- the cloud field (`cloud_model`, `sampled` by default);
+- **pass failures**: each new contact fails outright with
+  `pass_failure_prob`. No telemetry, no uplink, and downlinks get
+  `pass_failed`.
+- **uplink failures**: each uplink attempt fails with `uplink_failure_prob`
+  and is retried at the next contact;
+- **anomalies**: random safe-mode faults, a Poisson process at
+  `anomaly_rate_per_sat_day`. The satellite stays in safe mode for at least
+  `anomaly_recovery_s`.
+
+Contacts already in progress when the rollout starts aren't re-rolled.
+
+**Response** (`RolloutResult`):
+
+| field | |
+|---|---|
+| `validation` | `PlanBatchResult` for the candidate plans. Invalid plans are reported here, not raised as errors. |
+| `samples[]` | `{index, seed, metrics, requests_fulfilled, fulfilled_priority}` per run. `metrics` covers only the rollout window. |
+| `summary` | `{metric: {mean, std, min, p10, p50, p90, max}}` for coverage, images, data, latency, utilisation, safe mode, requests fulfilled, and fulfilled priority |
+| `request_fulfillment_prob` | for each request open at the start: the fraction of samples that fulfilled it |
+| `plan_uplink_prob` | for each accepted candidate plan: the fraction of samples in which it reached the satellite |
+| `activity_success_prob` | for each candidate activity: the fraction of samples in which it produced data |
+| `plans`, `events` | detail from the deterministic run, or from sample 0 |
+| `wall_time_s` | how long the server took |
+
+Notes:
+
+- IDs assigned inside a rollout (plans, activities, images) exist only in
+  that rollout.
+- `satellite_ids` simulates only those satellites and freezes the rest.
+  That's much faster, and is the usual choice for evaluating one
+  satellite's plan. Other satellites' existing reservations still count
+  towards antenna conflicts.
+- Rollouts are synchronous. With the mock, a 6-hour rollout of 180
+  satellites takes about 10 s per sample. Use `satellite_ids` or fewer
+  samples inside optimisation loops.
 
 ---
 
@@ -281,6 +363,11 @@ fulfilled` (that image fully downlinked by `window_end`), or `→ expired`.
   suite (or your planners) at the real simulator, construct
   `SimClient("http://localhost:8080")`.
 - **Required for planning**: §3, §4, §6, `/events`, `/metrics`.
+- **Rollouts need the simulation state to be copyable.** Keep all mutable
+  state in plain data structs, with no GPU or render handles, so you can
+  copy it and step it headless on worker threads. Randomness has to be
+  injectable per copy (a seeded RNG) for Monte Carlo runs. The same
+  property makes save/load and replay easy.
   **Nice to have**: `/access/*` (planners can compute these themselves from
   `orbit`), `/coverage`, `/weather`.
 - Run the HTTP server on its own thread and hand commands to the sim thread

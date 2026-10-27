@@ -1593,6 +1593,77 @@
         }
       }
     },
+    "/api/v1/rollouts": {
+      "post": {
+        "tags": [
+          "plans"
+        ],
+        "summary": "Rollout",
+        "operationId": "rollout_api_v1_rollouts_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RolloutRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RolloutResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unprocessable Content",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/requests": {
       "post": {
         "tags": [
@@ -2447,6 +2518,15 @@
           "forecasts"
         ],
         "title": "CloudForecastResponse"
+      },
+      "CloudModel": {
+        "type": "string",
+        "enum": [
+          "forecast",
+          "sampled",
+          "truth"
+        ],
+        "title": "CloudModel"
       },
       "CloudQuery": {
         "properties": {
@@ -3593,6 +3673,49 @@
         ],
         "title": "ImagingRequestCreate"
       },
+      "MetricStats": {
+        "properties": {
+          "mean": {
+            "type": "number",
+            "title": "Mean"
+          },
+          "std": {
+            "type": "number",
+            "title": "Std"
+          },
+          "min": {
+            "type": "number",
+            "title": "Min"
+          },
+          "p10": {
+            "type": "number",
+            "title": "P10"
+          },
+          "p50": {
+            "type": "number",
+            "title": "P50"
+          },
+          "p90": {
+            "type": "number",
+            "title": "P90"
+          },
+          "max": {
+            "type": "number",
+            "title": "Max"
+          }
+        },
+        "type": "object",
+        "required": [
+          "mean",
+          "std",
+          "min",
+          "p10",
+          "p50",
+          "p90",
+          "max"
+        ],
+        "title": "MetricStats"
+      },
       "Metrics": {
         "properties": {
           "sim_time": {
@@ -3683,6 +3806,60 @@
           "requests"
         ],
         "title": "Metrics"
+      },
+      "MonteCarloConfig": {
+        "properties": {
+          "samples": {
+            "type": "integer",
+            "maximum": 500.0,
+            "minimum": 2.0,
+            "title": "Samples",
+            "default": 20
+          },
+          "seed": {
+            "type": "integer",
+            "title": "Seed",
+            "description": "Sample k uses seed + k, so results are reproducible.",
+            "default": 0
+          },
+          "cloud_model": {
+            "$ref": "#/components/schemas/CloudModel",
+            "default": "sampled"
+          },
+          "pass_failure_prob": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Pass Failure Prob",
+            "description": "Chance a whole contact fails (no telemetry, uplink or downlink).",
+            "default": 0.0
+          },
+          "uplink_failure_prob": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Uplink Failure Prob",
+            "description": "Chance an uplink attempt fails; retried at the next contact.",
+            "default": 0.0
+          },
+          "anomaly_rate_per_sat_day": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Anomaly Rate Per Sat Day",
+            "description": "Poisson rate of random safe-mode faults per satellite per day.",
+            "default": 0.0
+          },
+          "anomaly_recovery_s": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Anomaly Recovery S",
+            "description": "Minimum time a faulted satellite stays in safe mode.",
+            "default": 21600.0
+          }
+        },
+        "type": "object",
+        "title": "MonteCarloConfig",
+        "description": "Uncertainty injected independently into each rollout sample."
       },
       "OnboardSchedule": {
         "properties": {
@@ -4267,6 +4444,248 @@
           "images_onboard"
         ],
         "title": "Resources"
+      },
+      "RolloutRequest": {
+        "properties": {
+          "plans": {
+            "items": {
+              "$ref": "#/components/schemas/PlanSubmission"
+            },
+            "type": "array",
+            "title": "Plans"
+          },
+          "atomic": {
+            "type": "boolean",
+            "title": "Atomic",
+            "default": false
+          },
+          "until": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Until"
+          },
+          "duration_s": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration S",
+            "description": "Alternative to `until`."
+          },
+          "cancel_queued": {
+            "type": "boolean",
+            "title": "Cancel Queued",
+            "description": "First cancel still-queued plans of every satellite that has a candidate plan.",
+            "default": false
+          },
+          "satellite_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Satellite Ids",
+            "description": "Simulate only these satellites (others are frozen). Much faster; metrics cover only these."
+          },
+          "cloud_model": {
+            "$ref": "#/components/schemas/CloudModel",
+            "description": "Cloud model for a deterministic (non Monte Carlo) rollout.",
+            "default": "forecast"
+          },
+          "monte_carlo": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MonteCarloConfig"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "include_plans": {
+            "type": "boolean",
+            "title": "Include Plans",
+            "description": "Final state of the candidate plans (deterministic run, or Monte Carlo sample 0).",
+            "default": true
+          },
+          "include_events": {
+            "type": "boolean",
+            "title": "Include Events",
+            "default": false
+          },
+          "event_types": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/EventType"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Types"
+          }
+        },
+        "type": "object",
+        "title": "RolloutRequest",
+        "description": "Simulate candidate plans forward on a *copy* of the current state. The live sim is untouched.\n\nThe copy includes everything already queued/onboard; candidate plans are validated and\napplied on top exactly as ``POST /plans/batch`` would."
+      },
+      "RolloutResult": {
+        "properties": {
+          "start": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Start"
+          },
+          "end": {
+            "type": "string",
+            "format": "date-time",
+            "title": "End"
+          },
+          "monte_carlo": {
+            "type": "boolean",
+            "title": "Monte Carlo"
+          },
+          "samples_run": {
+            "type": "integer",
+            "title": "Samples Run"
+          },
+          "validation": {
+            "$ref": "#/components/schemas/PlanBatchResult"
+          },
+          "samples": {
+            "items": {
+              "$ref": "#/components/schemas/RolloutSample"
+            },
+            "type": "array",
+            "title": "Samples"
+          },
+          "summary": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/MetricStats"
+            },
+            "type": "object",
+            "title": "Summary",
+            "description": "Per-metric statistics across samples (std = 0 for one sample)."
+          },
+          "request_fulfillment_prob": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object",
+            "title": "Request Fulfillment Prob",
+            "description": "For each request still open/captured at start: fraction of samples in which it was fulfilled."
+          },
+          "plan_uplink_prob": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object",
+            "title": "Plan Uplink Prob",
+            "description": "For each accepted candidate plan: fraction of samples in which it reached the satellite."
+          },
+          "activity_success_prob": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object",
+            "title": "Activity Success Prob",
+            "description": "For each candidate activity id: fraction of samples in which it completed (fully or partially)."
+          },
+          "plans": {
+            "items": {
+              "$ref": "#/components/schemas/Plan"
+            },
+            "type": "array",
+            "title": "Plans"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/Event"
+            },
+            "type": "array",
+            "title": "Events"
+          },
+          "wall_time_s": {
+            "type": "number",
+            "title": "Wall Time S"
+          }
+        },
+        "type": "object",
+        "required": [
+          "start",
+          "end",
+          "monte_carlo",
+          "samples_run",
+          "validation",
+          "samples",
+          "summary",
+          "request_fulfillment_prob",
+          "plan_uplink_prob",
+          "activity_success_prob",
+          "wall_time_s"
+        ],
+        "title": "RolloutResult"
+      },
+      "RolloutSample": {
+        "properties": {
+          "index": {
+            "type": "integer",
+            "title": "Index"
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seed"
+          },
+          "metrics": {
+            "$ref": "#/components/schemas/Metrics"
+          },
+          "requests_fulfilled": {
+            "type": "integer",
+            "title": "Requests Fulfilled",
+            "description": "Requests fulfilled during the rollout."
+          },
+          "fulfilled_priority": {
+            "type": "number",
+            "title": "Fulfilled Priority"
+          }
+        },
+        "type": "object",
+        "required": [
+          "index",
+          "seed",
+          "metrics",
+          "requests_fulfilled",
+          "fulfilled_priority"
+        ],
+        "title": "RolloutSample"
       },
       "SatelliteMode": {
         "type": "string",

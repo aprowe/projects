@@ -17,4 +17,6 @@ def inprocess_client(**reset: Any):
     from .engine import Engine
     from .server import create_app
 
-    return SimClient(http=TestClient(create_app(Engine(m.SimReset(**reset)))))
+    http = TestClient(create_app(Engine(m.SimReset(**reset))))
+    http._planetsim_inprocess = True
+    return SimClient(http=http)

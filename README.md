@@ -61,6 +61,11 @@ plan = (PlanBuilder(c.satellite_id, now, now + timedelta(hours=6))
 print(sim.validate_plan(plan))                    # dry run
 sim.submit_plan(plan)                             # queued -> uplinked at next contact
 
+# what-if: run it forward on a copy (live sim untouched), with uncertainty
+ro = sim.rollout([plan], duration=timedelta(hours=6),
+                 monte_carlo=dict(samples=30, pass_failure_prob=0.05, uplink_failure_prob=0.1))
+print(ro.summary["images_downlinked"], ro.plan_uplink_prob)
+
 sim.step(timedelta(hours=6))                      # deterministic while paused
 print(sim.metrics())
 for ev in sim.iter_events(types=["plan_uplinked"]):
@@ -84,6 +89,9 @@ to improve. Ideas to practise:
   each cell was last imaged.
 - Keep plans power-feasible, especially for eclipse downlinks.
 - Rolling-horizon replanning driven by `/events` and telemetry instead of truth.
+- Robust planning: score candidates with Monte Carlo `rollout`s (expected
+  value, p10 or CVaR) instead of a single deterministic run. Use
+  `request_fulfillment_prob` to find requests worth a backup opportunity.
 
 ## Default scenario (illustrative numbers, tune in `mock/scenario.py`)
 

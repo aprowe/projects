@@ -14,6 +14,7 @@ from fastapi.responses import JSONResponse
 
 from .. import models as m
 from .engine import ApiError, Engine
+from .rollout import run_rollout
 
 P = f"/api/{m.API_VERSION}"
 ERRORS = {r: {"model": m.ErrorResponse} for r in (400, 404, 409, 422)}
@@ -194,6 +195,11 @@ def create_app(engine: Engine | None = None) -> FastAPI:
         e = synced()
         with e.lock:
             return e.plan_model(e.cancel(plan_id))
+
+    @app.post(P + "/rollouts", response_model=m.RolloutResult, tags=["plans"])
+    def rollout(req: m.RolloutRequest):
+        # forks under the lock, then simulates the copies without blocking the live sim
+        return run_rollout(synced(), req)
 
     # ---------------------------------------------------------------- requests
     @app.post(P + "/requests", response_model=m.ImagingRequest, status_code=201, tags=["requests"])

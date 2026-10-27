@@ -14,7 +14,7 @@ The clock is lazy: when running, the engine catches up to
 from __future__ import annotations
 
 import bisect
-import itertools
+import copy
 import math
 import threading
 import time
@@ -126,6 +126,7 @@ class SatRec:
     current_act: ActRec | None = None
     storage_full_flag: bool = False
     battery_low_flag: bool = False
+    safe_until: float = 0.0
     completed_act_ids: list[str] = field(default_factory=list)
 
 
@@ -156,7 +157,18 @@ class Engine:
             self.t = 0.0
             self.running, self.rate = False, 60.0
             self._wall = time.monotonic()
-            self._ids = itertools.count(1)
+            self._next_id = 1
+            self._seq = 0
+            # uncertainty hooks (off for the live sim; set per Monte Carlo rollout sample)
+            self.cloud_mode = m.CloudModel.truth
+            self.cloud_issue_t = 0.0
+            self.cloud_err: tuple[np.ndarray, ...] | None = None
+            self.mc_rng: np.random.Generator | None = None
+            self.pass_fail_p = self.uplink_fail_p = self.anomaly_rate = 0.0
+            self.anomaly_recovery_s = 0.0
+            self.failed_pairs: set[tuple[int, int]] = set()
+            self.uplink_failed_pairs: set[tuple[int, int]] = set()
+            self.sim_mask: np.ndarray | None = None  # simulate only these satellites
 
             # satellites
             a, inc, raan0, u0 = [], [], [], []
@@ -237,10 +249,59 @@ class Engine:
         return (dt - self.epoch).total_seconds()
 
     def _id(self, prefix: str) -> str:
-        return f"{prefix}-{next(self._ids):06d}"
+        self._next_id += 1
+        return f"{prefix}-{self._next_id - 1:06d}"
 
     def _emit(self, typ: m.EventType, *, t: float | None = None, **kw: Any) -> None:
-        self.events.append(m.Event(seq=len(self.events) + 1, time=self.to_dt(self.t if t is None else t), type=typ, **kw))
+        self._seq += 1
+        self.events.append(m.Event(seq=self._seq, time=self.to_dt(self.t if t is None else t), type=typ, **kw))
+
+    # ------------------------------------------------------------------ #
+    # forking (for rollouts)
+    # ------------------------------------------------------------------ #
+
+    def __getstate__(self) -> dict:
+        state = self.__dict__.copy()
+        del state["lock"]
+        return state
+
+    def __setstate__(self, state: dict) -> None:
+        self.__dict__.update(state)
+        self.lock = threading.RLock()
+
+    def fork(self) -> Engine:
+        """Independent, paused copy of the current state.
+
+        History that cannot affect the future (events, finished plans, downlinked
+        images) is left out to keep the copy cheap.
+        """
+        with self.lock:
+            saved = self.events, self.images, self.image_order, self.plans
+            try:
+                self.events = []
+                self.images = {k: v for k, v in saved[1].items() if v.status == m.ImageStatus.onboard}
+                self.image_order = [k for k in saved[2] if k in self.images]
+                live = (m.PlanStatus.queued, m.PlanStatus.uplinked, m.PlanStatus.active)
+                self.plans = {k: p for k, p in saved[3].items() if p.status in live}
+                clone = copy.deepcopy(self)
+            finally:
+                self.events, self.images, self.image_order, self.plans = saved
+        clone.running = False
+        return clone
+
+    def configure_uncertainty(self, mc: m.MonteCarloConfig | None, cloud_mode: m.CloudModel, seed: int | None) -> None:
+        """Switch this (forked) engine to rollout mode."""
+        self.cloud_mode, self.cloud_issue_t = cloud_mode, self.t
+        rng = np.random.default_rng(seed)
+        if cloud_mode == m.CloudModel.sampled:
+            # smooth random forecast-error field: a few random plane waves in (lat, lon, t)
+            k = 6
+            self.cloud_err = (rng.integers(1, 6, k), rng.integers(1, 6, k), rng.normal(0, 0.1, k),
+                              rng.uniform(0, 2 * np.pi, k), rng.normal(0, 1, k) / np.sqrt(k / 2))
+        if mc is not None:
+            self.mc_rng = rng
+            self.pass_fail_p, self.uplink_fail_p = mc.pass_failure_prob, mc.uplink_failure_prob
+            self.anomaly_rate, self.anomaly_recovery_s = mc.anomaly_rate_per_sat_day, mc.anomaly_recovery_s
 
     def sync(self) -> None:
         """Catch the sim clock up with wall time when running."""
@@ -277,6 +338,29 @@ class Engine:
              + 0.15 * np.sin(5 * lat - 0.08 * h) + 0.1 * np.cos(7 * lon + 4 * lat + 0.11 * h))
         return np.clip(s, 0, 1)
 
+    def _forecast_sigma(self, t, issued):
+        lead_h = np.maximum(0.0, (np.asarray(t) - issued) / 3600.0)
+        return np.minimum(0.4, 0.03 + 0.15 * lead_h / 24.0)
+
+    def _forecast_mean(self, lat, lon, t, issued):
+        """Forecast issued at ``issued``: truth plus a deterministic error scaled by lead time."""
+        lat, lon, t = np.asarray(lat, float), np.asarray(lon, float), np.asarray(t, float)
+        h = np.sin(lat * 12.9898 + lon * 78.233 + t * 1e-4 + self.cfg.seed) * 43758.5453
+        noise = (h - np.floor(h) - 0.5) * 2 * self._forecast_sigma(t, issued)
+        return np.clip(self.cloud_truth(lat, lon, t) + noise, 0, 1)
+
+    def cloud_actual(self, lat, lon, t):
+        """Cloud fraction that imaging actually sees (truth live; model-dependent in rollouts)."""
+        if self.cloud_mode == m.CloudModel.truth:
+            return self.cloud_truth(lat, lon, t)
+        mean = self._forecast_mean(lat, lon, t, self.cloud_issue_t)
+        if self.cloud_mode == m.CloudModel.forecast or self.cloud_err is None:
+            return mean
+        fa, fo, ft, ph0, amp = self.cloud_err
+        la, lo = np.deg2rad(np.asarray(lat, float))[..., None], np.deg2rad(np.asarray(lon, float))[..., None]
+        err = np.sum(amp * np.sin(fa * la + fo * lo + ft * t / 3600.0 + ph0), axis=-1)
+        return np.clip(mean + err * self._forecast_sigma(t, self.cloud_issue_t), 0, 1)
+
     # ------------------------------------------------------------------ #
     # main loop
     # ------------------------------------------------------------------ #
@@ -298,7 +382,8 @@ class Engine:
 
         self._imaging_now: list[tuple[int, str]] = []
         for i, sat in enumerate(self.sats):
-            self._run_satellite(i, sat, t0, t1, prev_lonlat)
+            if self.sim_mask is None or self.sim_mask[i]:
+                self._run_satellite(i, sat, t0, t1, prev_lonlat)
 
         self.t = t1
         self._sample(t1)
@@ -306,10 +391,16 @@ class Engine:
         new_contacts = self.in_view & ~prev_in_view
         lost_contacts = prev_in_view & ~self.in_view
         for i, j in zip(*np.nonzero(new_contacts)):
-            self._emit(m.EventType.contact_start, satellite_id=self.sats[i].id, station_id=self.stations[j].id)
+            failed = self.mc_rng is not None and self.pass_fail_p > 0 and self.mc_rng.random() < self.pass_fail_p
+            if failed:
+                self.failed_pairs.add((i, j))
+            self._emit(m.EventType.contact_start, satellite_id=self.sats[i].id, station_id=self.stations[j].id,
+                       data={"failed": True} if failed else {})
         for i, j in zip(*np.nonzero(lost_contacts)):
             self._emit(m.EventType.contact_end, satellite_id=self.sats[i].id, station_id=self.stations[j].id)
             self.contact_elapsed[i, j] = 0.0
+            self.failed_pairs.discard((i, j))
+            self.uplink_failed_pairs.discard((i, j))
         self._update_plans(t1)
         self._update_requests(t1)
 
@@ -325,6 +416,8 @@ class Engine:
         rules = self.scn.rules
         self.contact_elapsed[in_view] += dt
         for i, j in zip(*np.nonzero(in_view)):
+            if (self.sim_mask is not None and not self.sim_mask[i]) or (i, j) in self.failed_pairs:
+                continue
             sat, st = self.sats[i], self.stations[j]
             busy = self._antennas_busy(j, t)
             own_downlink = i in busy
@@ -338,7 +431,11 @@ class Engine:
                 if self.contact_elapsed[i, j] <= dt:
                     self._emit(m.EventType.telemetry_received, satellite_id=sat.id, station_id=st.id)
             if sat.queue and (own_downlink or rules.opportunistic_uplink) \
-                    and self.contact_elapsed[i, j] >= rules.uplink_duration_s:
+                    and self.contact_elapsed[i, j] >= rules.uplink_duration_s \
+                    and (i, j) not in self.uplink_failed_pairs:
+                if self.mc_rng is not None and self.uplink_fail_p > 0 and self.mc_rng.random() < self.uplink_fail_p:
+                    self.uplink_failed_pairs.add((i, j))  # this pass is wasted; retry at the next one
+                    continue
                 for pid in list(sat.queue):
                     self._uplink(self.plans[pid], t + dt, j)
                 sat.queue.clear()
@@ -408,11 +505,15 @@ class Engine:
 
         # safe mode transitions
         frac = sat.battery_wh / spec.battery_capacity_wh
-        if sat.health != m.HealthStatus.safe and frac < rules.safe_mode_enter_battery_frac:
+        anomaly = (self.mc_rng is not None and self.anomaly_rate > 0 and sat.health != m.HealthStatus.safe
+                   and self.mc_rng.random() < self.anomaly_rate * dt / 86400.0)
+        if sat.health != m.HealthStatus.safe and (anomaly or frac < rules.safe_mode_enter_battery_frac):
             sat.health, sat.mode = m.HealthStatus.safe, m.SatelliteMode.safe
+            sat.safe_until = t0 + (self.anomaly_recovery_s if anomaly else 0.0)
             self._close_image(sat, t0)
-            self._emit(m.EventType.safe_mode_entered, satellite_id=sat.id, data={"battery_frac": frac})
-        elif sat.health == m.HealthStatus.safe and frac >= rules.safe_mode_exit_battery_frac:
+            self._emit(m.EventType.safe_mode_entered, satellite_id=sat.id,
+                       data={"battery_frac": frac, "cause": "anomaly" if anomaly else "low_battery"})
+        elif sat.health == m.HealthStatus.safe and frac >= rules.safe_mode_exit_battery_frac and t0 >= sat.safe_until:
             sat.health = m.HealthStatus.nominal
             sat.mode = m.SatelliteMode.idle
             self._emit(m.EventType.safe_mode_exited, satellite_id=sat.id)
@@ -449,6 +550,8 @@ class Engine:
                 j = act.station
                 if not self.in_view[i, j]:
                     act.reasons.add("station_not_in_view")
+                elif (i, j) in self.failed_pairs:
+                    act.reasons.add("pass_failed")
                 else:
                     rate = spec.downlink_rate_mbps
                     if self.stations[j].max_downlink_rate_mbps:
@@ -558,7 +661,7 @@ class Engine:
         imgs = [self.images[k] for _, k in self._imaging_now]
         g0, g1 = g_prev[idx], self.ground_unit[idx]
         lat1, lon1 = self.lat[idx], self.lon[idx]
-        clouds = self.cloud_truth(lat1, lon1, t)
+        clouds = self.cloud_actual(lat1, lon1, t)
         for k, img in enumerate(imgs):
             img.centerline.append((round(float(lon1[k]), 4), round(float(lat1[k]), 4)))
             img.cloud_sum += float(clouds[k])
@@ -589,7 +692,7 @@ class Engine:
             q, img = reqs[k], imgs[j]
             if q.id in img.request_ids:
                 continue
-            cloud = float(self.cloud_truth(q.spec.target.lat_deg, q.spec.target.lon_deg, t))
+            cloud = float(self.cloud_actual(q.spec.target.lat_deg, q.spec.target.lon_deg, t))
             if cloud > q.spec.max_cloud_fraction:
                 continue
             img.request_ids.append(q.id)
@@ -935,14 +1038,10 @@ class Engine:
         for k, p in enumerate(q.points):
             when = q.times[0] if len(q.times) == 1 else q.times[k]
             t = self.to_s(when)
-            lead_h = max(0.0, (t - self.t) / 3600.0)
-            sigma = min(0.4, 0.03 + 0.15 * lead_h / 24.0)
-            # deterministic pseudo-noise so repeated queries agree
-            h = math.sin(p.lat_deg * 12.9898 + p.lon_deg * 78.233 + t * 1e-4 + self.cfg.seed) * 43758.5453
-            noise = (h - math.floor(h) - 0.5) * 2 * sigma
-            truth = float(self.cloud_truth(p.lat_deg, p.lon_deg, t))
+            sigma = float(self._forecast_sigma(t, self.t))
             out.append(m.CloudForecast(point=p, time=when, issued_at=self.to_dt(self.t),
-                                       cloud_fraction=float(np.clip(truth + noise, 0, 1)), sigma=round(sigma, 3)))
+                                       cloud_fraction=float(self._forecast_mean(p.lat_deg, p.lon_deg, t, self.t)),
+                                       sigma=round(sigma, 3)))
         return out
 
     # ------------------------------------------------------------------ #

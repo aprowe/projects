@@ -70,11 +70,15 @@ class SimClient:
     # plumbing
     # ------------------------------------------------------------------ #
 
-    def _request(self, method: str, path: str, *, params: dict | None = None, body: Any = None) -> Any:
+    def _request(self, method: str, path: str, *, params: dict | None = None, body: Any = None,
+                 timeout: Any = httpx.USE_CLIENT_DEFAULT) -> Any:
         if isinstance(body, BaseModel):
             body = body.model_dump(mode="json", exclude_none=True)
         params = {k: v for k, v in (params or {}).items() if v is not None}
-        resp = self._http.request(method, PREFIX + path, params=params, json=body)
+        kw = {}
+        if timeout is not httpx.USE_CLIENT_DEFAULT and not getattr(self._http, "_planetsim_inprocess", False):
+            kw["timeout"] = timeout  # the in-process transport has no timeouts (and warns if given one)
+        resp = self._http.request(method, PREFIX + path, params=params, json=body, **kw)
         if resp.status_code >= 400:
             try:
                 err = m.ErrorResponse.model_validate(resp.json()).error
@@ -219,6 +223,43 @@ class SimClient:
 
     def submit_plans(self, plans: Sequence[m.PlanSubmission], *, atomic: bool = False) -> m.PlanBatchResult:
         return self._post("/plans/batch", m.PlanBatchResult, m.PlanBatchSubmission(plans=list(plans), atomic=atomic))
+
+    def rollout(
+        self,
+        plans: Sequence[m.PlanSubmission] = (),
+        *,
+        until: datetime | None = None,
+        duration: float | timedelta | None = None,
+        monte_carlo: m.MonteCarloConfig | dict | int | None = None,
+        cloud_model: m.CloudModel | str = m.CloudModel.forecast,
+        satellite_ids: Sequence[str] | None = None,
+        cancel_queued: bool = False,
+        atomic: bool = False,
+        include_plans: bool = True,
+        include_events: bool = False,
+        event_types: Sequence[m.EventType | str] | None = None,
+        timeout: float | None = None,
+    ) -> m.RolloutResult:
+        """Simulate ``plans`` forward on a copy of the current state; the live sim is untouched.
+
+        ``monte_carlo`` turns on sampling: an int (number of samples), a dict of
+        :class:`~planetsim.models.MonteCarloConfig` fields, or the model itself.
+        Rollouts can be slow, so there is no client timeout by default.
+        """
+        if isinstance(duration, timedelta):
+            duration = duration.total_seconds()
+        if isinstance(monte_carlo, int):
+            monte_carlo = m.MonteCarloConfig(samples=monte_carlo)
+        elif isinstance(monte_carlo, dict):
+            monte_carlo = m.MonteCarloConfig(**monte_carlo)
+        req = m.RolloutRequest(
+            plans=list(plans), atomic=atomic, until=until, duration_s=duration, cancel_queued=cancel_queued,
+            satellite_ids=list(satellite_ids) if satellite_ids is not None else None,
+            cloud_model=cloud_model, monte_carlo=monte_carlo, include_plans=include_plans,
+            include_events=include_events, event_types=list(event_types) if event_types else None,
+        )
+        return TypeAdapter(m.RolloutResult).validate_python(
+            self._request("POST", "/rollouts", body=req, timeout=timeout))
 
     def plans(
         self, *, satellite_id: str | None = None, status: m.PlanStatus | Sequence[m.PlanStatus] | None = None

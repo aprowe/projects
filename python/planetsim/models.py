@@ -629,3 +629,79 @@ class CloudForecast(_Model):
 class CloudForecastResponse(_Model):
     forecasts: list[CloudForecast]
 
+
+# --------------------------------------------------------------------------- #
+# Rollouts (what-if simulation, optionally Monte Carlo)
+# --------------------------------------------------------------------------- #
+
+
+class CloudModel(str, Enum):
+    forecast = "forecast"  # clouds = the forecast issued at rollout start (what the planner expects)
+    sampled = "sampled"    # forecast + random error drawn per sample with the forecast's sigma
+    truth = "truth"        # oracle: the simulator's true cloud field (upper bound / debugging only)
+
+
+class MonteCarloConfig(_Model):
+    """Uncertainty injected independently into each rollout sample."""
+
+    samples: int = Field(default=20, ge=2, le=500)
+    seed: int = Field(default=0, description="Sample k uses seed + k, so results are reproducible.")
+    cloud_model: CloudModel = CloudModel.sampled
+    pass_failure_prob: float = Field(default=0.0, ge=0, le=1, description="Chance a whole contact fails (no telemetry, uplink or downlink).")
+    uplink_failure_prob: float = Field(default=0.0, ge=0, le=1, description="Chance an uplink attempt fails; retried at the next contact.")
+    anomaly_rate_per_sat_day: float = Field(default=0.0, ge=0, description="Poisson rate of random safe-mode faults per satellite per day.")
+    anomaly_recovery_s: float = Field(default=6 * 3600.0, ge=0, description="Minimum time a faulted satellite stays in safe mode.")
+
+
+class RolloutRequest(_Model):
+    """Simulate candidate plans forward on a *copy* of the current state. The live sim is untouched.
+
+    The copy includes everything already queued/onboard; candidate plans are validated and
+    applied on top exactly as ``POST /plans/batch`` would.
+    """
+
+    plans: list[PlanSubmission] = Field(default_factory=list)
+    atomic: bool = False
+    until: AwareDatetime | None = None
+    duration_s: float | None = Field(default=None, gt=0, description="Alternative to `until`.")
+    cancel_queued: bool = Field(default=False, description="First cancel still-queued plans of every satellite that has a candidate plan.")
+    satellite_ids: list[str] | None = Field(default=None, description="Simulate only these satellites (others are frozen). Much faster; metrics cover only these.")
+    cloud_model: CloudModel = Field(default=CloudModel.forecast, description="Cloud model for a deterministic (non Monte Carlo) rollout.")
+    monte_carlo: MonteCarloConfig | None = None
+    include_plans: bool = Field(default=True, description="Final state of the candidate plans (deterministic run, or Monte Carlo sample 0).")
+    include_events: bool = False
+    event_types: list[EventType] | None = None
+
+
+class MetricStats(_Model):
+    mean: float
+    std: float
+    min: float
+    p10: float
+    p50: float
+    p90: float
+    max: float
+
+
+class RolloutSample(_Model):
+    index: int
+    seed: int | None
+    metrics: Metrics
+    requests_fulfilled: int = Field(description="Requests fulfilled during the rollout.")
+    fulfilled_priority: float
+
+
+class RolloutResult(_Model):
+    start: AwareDatetime
+    end: AwareDatetime
+    monte_carlo: bool
+    samples_run: int
+    validation: PlanBatchResult
+    samples: list[RolloutSample]
+    summary: dict[str, MetricStats] = Field(description="Per-metric statistics across samples (std = 0 for one sample).")
+    request_fulfillment_prob: dict[str, float] = Field(description="For each request still open/captured at start: fraction of samples in which it was fulfilled.")
+    plan_uplink_prob: dict[str, float] = Field(description="For each accepted candidate plan: fraction of samples in which it reached the satellite.")
+    activity_success_prob: dict[str, float] = Field(description="For each candidate activity id: fraction of samples in which it completed (fully or partially).")
+    plans: list[Plan] = Field(default_factory=list)
+    events: list[Event] = Field(default_factory=list)
+    wall_time_s: float
